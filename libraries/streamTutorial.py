@@ -754,6 +754,105 @@ class Selection:
         return combined_mask
 
 
+def register_kinematic_masks(selection, cfg, streamfinder_df):
+    """
+    Register standard kinematic masks on a Selection.
+
+    All masks are always defined; users choose which ones to apply later via Selection.get_masks().
+
+    Expected cfg structure:
+        cfg = {
+            'spline': {
+                'vgsr':  {'phi1': [...], 'vgsr': [...],  'wiggle': float},
+                'pmra':  {'phi1': [...], 'pmra': [...],  'wiggle': float},
+                'pmdec': {'phi1': [...], 'pmdec': [...], 'wiggle': float},
+            },
+            'sf': {   # StreamFinder track with a wiggle around endpoints
+                'pmra_wiggle': float,
+                'pmdec_wiggle': float,
+            },
+            'wide': {
+                'vgsr_box': (min, max),
+                'pmra_box': (min, max),
+                'pmdec_box': (min, max),
+            },
+        }
+    """
+    if selection is None or cfg is None:
+        raise ValueError("Selection and cfg must be provided.")
+
+    spline_cfg = cfg.get('spline', {})
+    sf_cfg = cfg.get('sf', {})
+    wide_cfg = cfg.get('wide', {})
+
+    def _add_box(name, col, bounds):
+        lo, hi = bounds
+        selection.add_mask(name, lambda df, lo=lo, hi=hi, col=col: (df[col] > lo) & (df[col] < hi))
+
+    def _add_spline(name, col, phi1_vals, y_vals, wiggle):
+        spline = sp.interpolate.InterpolatedUnivariateSpline(np.asarray(phi1_vals, dtype=float),
+                                                             np.asarray(y_vals, dtype=float), k=2)
+        selection.add_mask(
+            name,
+            lambda df, spline=spline, wiggle=wiggle, col=col:
+                (df[col] >= spline(df['phi1']) - wiggle) &
+                (df[col] <= spline(df['phi1']) + wiggle)
+        )
+
+    def _streamfinder_endpoints(field):
+        phi_lo = streamfinder_df['phi1'].min()
+        phi_hi = streamfinder_df['phi1'].max()
+        y_lo = streamfinder_df.loc[streamfinder_df['phi1'].idxmin(), field]
+        y_hi = streamfinder_df.loc[streamfinder_df['phi1'].idxmax(), field]
+        return phi_lo, phi_hi, y_lo, y_hi
+
+    # --- VGSR spline mask ---
+    if 'vgsr' in spline_cfg:
+        vs = spline_cfg['vgsr']
+        wiggle = vs.get('wiggle', 0)
+        _add_spline('VGSR_spline', 'VGSR', vs['phi1'], vs['vgsr'], wiggle)
+
+    # --- PMRA masks ---
+    pmra_wiggle_sf = sf_cfg.get('pmra_wiggle', 0)
+    phi_lo, phi_hi, pmra_lo, pmra_hi = _streamfinder_endpoints('pmRA')
+    selection.add_mask(
+        'PMRA_SF',
+        lambda df, wiggle=pmra_wiggle_sf, phi_lo=phi_lo, phi_hi=phi_hi, pm_lo=pmra_lo, pm_hi=pmra_hi:
+            (df['PMRA'] >= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo - wiggle, pm_hi - wiggle])) &
+            (df['PMRA'] <= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo + wiggle, pm_hi + wiggle]))
+    )
+
+    if 'pmra' in spline_cfg:
+        ps = spline_cfg['pmra']
+        wiggle = ps.get('wiggle', pmra_wiggle_sf)
+        _add_spline('PMRA_spline', 'PMRA', ps['phi1'], ps['pmra'], wiggle)
+
+    # --- PMDEC masks ---
+    pmdec_wiggle_sf = sf_cfg.get('pmdec_wiggle', 0)
+    phi_lo, phi_hi, pmdec_lo, pmdec_hi = _streamfinder_endpoints('pmDE')
+    selection.add_mask(
+        'PMDEC_SF',
+        lambda df, wiggle=pmdec_wiggle_sf, phi_lo=phi_lo, phi_hi=phi_hi, pm_lo=pmdec_lo, pm_hi=pmdec_hi:
+            (df['PMDEC'] >= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo - wiggle, pm_hi - wiggle])) &
+            (df['PMDEC'] <= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo + wiggle, pm_hi + wiggle]))
+    )
+
+    if 'pmdec' in spline_cfg:
+        ps = spline_cfg['pmdec']
+        wiggle = ps.get('wiggle', pmdec_wiggle_sf)
+        _add_spline('PMDEC_spline', 'PMDEC', ps['phi1'], ps['pmdec'], wiggle)
+
+    # --- Wide boxes ---
+    if 'vgsr_box' in wide_cfg:
+        _add_box('VGSR_wide', 'VGSR', wide_cfg['vgsr_box'])
+    if 'pmra_box' in wide_cfg:
+        _add_box('PMRA_wide', 'PMRA', wide_cfg['pmra_box'])
+    if 'pmdec_box' in wide_cfg:
+        _add_box('PMDEC_wide', 'PMDEC', wide_cfg['pmdec_box'])
+
+    return list(selection.masks.keys())
+
+
 class stream:
     def __init__(self, data_object, streamName='Sylgr-I21', frame=None, add_bhb=True, **kwargs):
         self.streamName = streamName
