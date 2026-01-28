@@ -1082,7 +1082,7 @@ class StreamPlotter:
             },
             'sf_in_desi_notsel': {
                 'marker': 'd',
-                's': 100,
+                's': 40,
                 'color': 'g',
                 # 'label': r'SF $\in$ DESI, Cut',
                 'edgecolor': 'k',
@@ -1711,7 +1711,7 @@ class StreamPlotter:
 
         return fig, ax
 
-    def iso_plot(self, wiggle = 0.18, showStream=True, show_sf_only=False, background=True, save=False, absolute=True, BHB=True, bhb_wiggle=True):
+    def iso_plot(self, wiggle = 0.18, showStream=True, show_sf_only=False, background=True, save=False, absolute=True, BHB=False, bhb_wiggle=False):
         """
         Plotting the isochrone and stars
         """
