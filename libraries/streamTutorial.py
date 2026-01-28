@@ -868,7 +868,7 @@ class stream:
 
         import os
         # file lives in DESI_streamTutorial/libraries; data/ is one level up
-        sf3_table_path = Path(__file__).resolve().parent.parent / 'data' / 'sf3_table_dr1.csv'
+        sf3_table_path = Path(__file__).resolve().parent.parent / 'data' / 'sf3_only_table.csv'
         sf3_table = pd.read_csv(sf3_table_path)
 
         # Try to find stream index by matching either 'Stream' or 'Galstream Stream name' columns
