@@ -1338,7 +1338,7 @@ class StreamPlotter:
         tnames = mwsts.get_track_names_in_sky_window([np.nanmin(self.data.desi_data['TARGET_RA']), np.nanmax(self.data.desi_data['TARGET_RA'])]*u.deg, [np.nanmin(self.data.desi_data['TARGET_DEC']), np.nanmax(self.data.desi_data['TARGET_DEC'])]*u.deg, frame=ac.ICRS, 
                                            On_only=False, wrap_angle=180.*u.deg)
         fig, ax = plt.subplots(1,1, figsize=(7,3))
-        ax.scatter(self.data.desi_data['TARGET_RA'], self.data.desi_data['TARGET_DEC'], color='grey', s=5, label='DESI data', alpha=0.9)
+        ax.scatter(self.data.desi_data['TARGET_RA'], self.data.desi_data['TARGET_DEC'], color='k', s=1, label='DESI data', alpha=0.05)
         for st in tnames:
             ax.plot(mwsts[st].track.ra, mwsts[st].track.dec, '-o', ms=2., label=st)
         ax.set_xlim(np.nanmin(self.data.desi_data['TARGET_RA'])-2, np.nanmax(self.data.desi_data['TARGET_RA'])+2)
@@ -1488,7 +1488,7 @@ class StreamPlotter:
         stream_funcs.plot_form(ax)  # Make sure this is defined or imported
 
     def kin_plot(self, showStream=True, show_sf_only=False, background=True, save=False, stream_frame=True,
-                 show_hist=False, show_feh=False, hist_kwargs=None):  # , galstream=False):
+                 show_hist=False, show_feh=False, overlay_galstreams=False, hist_kwargs=None):  # , galstream=False):
         """
         Plots the stream kinematics either on-sky or stream_frame.
 
@@ -1499,6 +1499,8 @@ class StreamPlotter:
             the velocity panel.
         show_feh : bool, optional
             If True, add a [Fe/H] panel beneath the kinematic panels. Compatible with show_hist.
+        overlay_galstreams : bool, optional
+            If True, overplot all galstreams tracks that fall in the sky window on the kinematic panels.
         hist_kwargs : dict, optional
             Extra keyword arguments forwarded to each histogram panel.
         """
@@ -1646,6 +1648,88 @@ class StreamPlotter:
                 **self.plot_params['background']
             )
 
+        if overlay_galstreams:
+            mwsts = getattr(self.stream, 'mwsts', None)
+            if mwsts is None:
+                print("overlay_galstreams=True but MWStreams catalog is unavailable; skipping overlay.")
+            else:
+                # limit to tracks within the DESI sky window to avoid clutter
+                ra_bounds = np.array([np.nanmin(self.data.desi_data['TARGET_RA']),
+                                      np.nanmax(self.data.desi_data['TARGET_RA'])]) * u.deg
+                dec_bounds = np.array([np.nanmin(self.data.desi_data['TARGET_DEC']),
+                                       np.nanmax(self.data.desi_data['TARGET_DEC'])]) * u.deg
+                try:
+                    track_names = mwsts.get_track_names_in_sky_window(
+                        ra_bounds, dec_bounds, frame=coord.ICRS, On_only=False, wrap_angle=180.0 * u.deg
+                    )
+                except Exception:
+                    track_names = []
+
+                cmap = plt.get_cmap('tab20')
+                label_fracs = [0.2, 0.5, 0.8]  # stagger labels along track to reduce collisions
+
+                for i, st in enumerate(track_names):
+                    track = mwsts[st].track
+                    try:
+                        ra_vals = np.asarray(track.ra.to(u.deg).value)
+                        dec_vals = np.asarray(track.dec.to(u.deg).value)
+                        vhel_vals = np.asarray(track.radial_velocity.to(u.km / u.s).value)
+                        pmra_vals = np.asarray(track.pm_ra_cosdec.to(u.mas / u.yr).value)
+                        pmdec_vals = np.asarray(track.pm_dec.to(u.mas / u.yr).value)
+                    except Exception:
+                        continue
+
+                    # transform to current stream frame if requested
+                    if stream_frame:
+                        try:
+                            tf = track.transform_to(self.stream.frame)
+                            x_vals = np.asarray(tf.phi1.deg)
+                        except Exception:
+                            x_vals = ra_vals
+                    else:
+                        x_vals = ra_vals
+
+                    try:
+                        vgsr_vals = stream_funcs.vhel_to_vgsr(ra_vals, dec_vals, vhel_vals).value
+                    except Exception:
+                        continue
+
+                    color = cmap(i % cmap.N)
+                    style = dict(self.plot_params.get('galstream_track', {}))
+                    style['color'] = color
+                    style['label'] = f"_gs_{st}"  # suppress legend entry
+
+                    vel_ax.plot(x_vals, vgsr_vals, **style)
+                    pmra_ax.plot(x_vals, pmra_vals, **style)
+                    pmdec_ax.plot(x_vals, pmdec_vals, **style)
+
+                    # place labels with slight offsets and arrows to avoid overlap
+                    def _annotate(ax, xs, ys, name, text_color, frac):
+                        if xs.size == 0 or ys.size == 0:
+                            return
+                        idx = int(np.clip(frac * (len(xs) - 1), 0, len(xs) - 1))
+                        x0, y0 = xs[idx], ys[idx]
+                        # offset labels a bit in display space; alternate directions with frac
+                        dy = (0.02 if (i % 2 == 0) else -0.02) * (np.nanmax(ys) - np.nanmin(ys) + 1e-6)
+                        ax.annotate(
+                            name,
+                            xy=(x0, y0),
+                            xytext=(0, dy),
+                            textcoords='offset points',
+                            ha='center',
+                            va='center',
+                            color='k',  # darker text
+                            fontsize=9,
+                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='none', alpha=0.7),
+                            arrowprops=dict(arrowstyle='->', color=text_color, lw=1, alpha=0.8),
+                            clip_on=True
+                        )
+
+                    frac = label_fracs[i % len(label_fracs)]
+                    _annotate(vel_ax, x_vals, vgsr_vals, st, color, frac)
+                    _annotate(pmra_ax, x_vals, pmra_vals, st, color, frac)
+                    _annotate(pmdec_ax, x_vals, pmdec_vals, st, color, frac)
+
         # Placeholder for orbit plotting logic
         # if hasattr(self.stream, orbit):
         #     ax.plot(
@@ -1653,27 +1737,59 @@ class StreamPlotter:
         #         self.orbit.<y>,
         #         **self.plot_params['orbit_track'])
 
-        if showStream:
-            # Safely set y-limits only when SF3 data exist
-            def _safe_concat(columns):
-                arrays = []
-                for df in (getattr(self.data, 'confirmed_sf_and_desi', pd.DataFrame()),
-                           getattr(self.data, 'cut_confirmed_sf_and_desi', pd.DataFrame())):
-                    if not df.empty and columns in df:
-                        arrays.append(np.asarray(df[columns]))
-                return np.concatenate(arrays) if arrays else None
+        # Always anchor y-limits to the DESI background so the scale is stable even when SF points are present.
+        def _finite_from_df(df, column):
+            if df is None or getattr(df, 'empty', False) or column not in df:
+                return np.array([])
+            arr = np.asarray(df[column])
+            return arr[np.isfinite(arr)]
 
-            v_vals = _safe_concat(col_y_)
-            if v_vals is not None and len(v_vals) > 0:
-                vel_ax.set_ylim(np.nanmin(v_vals) - 100, np.nanmax(v_vals) + 100)
+        def _safe_concat(columns):
+            arrays = []
+            for df in (getattr(self.data, 'confirmed_sf_and_desi', pd.DataFrame()),
+                       getattr(self.data, 'cut_confirmed_sf_and_desi', pd.DataFrame())):
+                if not df.empty and columns in df:
+                    arrays.append(np.asarray(df[columns]))
+            return np.concatenate(arrays) if arrays else np.array([])
 
-            pmra_vals = _safe_concat('PMRA')
-            if pmra_vals is not None and len(pmra_vals) > 0:
-                pmra_ax.set_ylim(np.nanmin(pmra_vals) - 7, np.nanmax(pmra_vals) + 7)
+        def _set_ylim_from_values(ax, values, min_pad, frac=0.02):
+            """
+            Set y-limits with minimal padding so data nearly fills the axis.
+            min_pad: absolute minimum padding to avoid zero-height limits.
+            frac: fractional padding of the data span (default 2%).
+            """
+            values = values[np.isfinite(values)]
+            if values.size == 0:
+                return
+            vmin, vmax = np.nanmin(values), np.nanmax(values)
+            if not np.isfinite(vmin) or not np.isfinite(vmax):
+                return
+            span = vmax - vmin
+            pad_val = max(span * frac, min_pad)
+            if span == 0:
+                ax.set_ylim(vmin - pad_val, vmax + pad_val)
+            else:
+                ax.set_ylim(vmin - pad_val, vmax + pad_val)
 
-            pmdec_vals = _safe_concat('PMDEC')
-            if pmdec_vals is not None and len(pmdec_vals) > 0:
-                pmdec_ax.set_ylim(np.nanmin(pmdec_vals) - 7, np.nanmax(pmdec_vals) + 7)
+        # Background-driven limits; fall back to SF when background is hidden or missing.
+        v_bg = _finite_from_df(self.data.desi_data if background else None, col_y)
+        pmra_bg = _finite_from_df(self.data.desi_data if background else None, 'PMRA')
+        pmdec_bg = _finite_from_df(self.data.desi_data if background else None, 'PMDEC')
+
+        if v_bg.size:
+            _set_ylim_from_values(vel_ax, v_bg, min_pad=5, frac=0.02)
+        else:
+            _set_ylim_from_values(vel_ax, _safe_concat(col_y_), min_pad=5, frac=0.02)
+
+        if pmra_bg.size:
+            _set_ylim_from_values(pmra_ax, pmra_bg, min_pad=0.2, frac=0.02)
+        else:
+            _set_ylim_from_values(pmra_ax, _safe_concat('PMRA'), min_pad=0.2, frac=0.02)
+
+        if pmdec_bg.size:
+            _set_ylim_from_values(pmdec_ax, pmdec_bg, min_pad=0.2, frac=0.02)
+        else:
+            _set_ylim_from_values(pmdec_ax, _safe_concat('PMDEC'), min_pad=0.2, frac=0.02)
 
         if show_hist:
             background_style = self.plot_params.get('background', {})
@@ -2407,31 +2523,46 @@ class StreamPlotter:
             for panel_ax in ax:
                 panel_ax.set_xlim(x_limits)
 
-            # In residuals mode, prefer y-limits based on high-probability member stars
-            # Use member stars for limits whenever probabilities are available (independent of whether they are drawn)
-            if residual_mode and stream_prob is not None:
-                high_prob_mask = stream_prob >= min_prob
-                high_prob_indices = np.where(high_prob_mask)[0]
-                if len(high_prob_indices) > 0:
-                    pad_v = self.plot_params.get('limits', {}).get('residual_pad_vgsr', 20)
-                    pad_pm = self.plot_params.get('limits', {}).get('residual_pad_pm', 2)
-                    pad_feh = self.plot_params.get('limits', {}).get('residual_pad_feh', 0.2)
-                    # Build residual arrays from high-probability members
-                    y1_hp = (self.data.desi_data['VGSR'].iloc[high_prob_indices]
-                             - preds['desi'].get('vgsr', np.zeros(len(self.data.desi_data)))[high_prob_indices]).to_numpy()
-                    y2_hp = (self.data.desi_data['PMRA'].iloc[high_prob_indices]
-                             - preds['desi'].get('pmra', np.zeros(len(self.data.desi_data)))[high_prob_indices]).to_numpy()
-                    y3_hp = (self.data.desi_data['PMDEC'].iloc[high_prob_indices]
-                             - preds['desi'].get('pmdec', np.zeros(len(self.data.desi_data)))[high_prob_indices]).to_numpy()
-                    # Set limits
-                    ax[1].set_ylim(np.nanmin(y1_hp) - pad_v, np.nanmax(y1_hp) + pad_v)
-                    ax[2].set_ylim(np.nanmin(y2_hp) - pad_pm, np.nanmax(y2_hp) + pad_pm)
-                    ax[3].set_ylim(np.nanmin(y3_hp) - pad_pm, np.nanmax(y3_hp) + pad_pm)
-                    if 'FEH' in self.data.desi_data.columns and isinstance(preds['desi'].get('feh', None), np.ndarray):
-                        y4_hp = (self.data.desi_data['FEH'].iloc[high_prob_indices] - preds['desi']['feh'][high_prob_indices]).to_numpy()
-                        ax[4].set_ylim(np.nanmin(y4_hp) - pad_feh, np.nanmax(y4_hp) + pad_feh)
-                    else:
-                        ax[4].set_ylim(-1, 1)
+            # In residuals mode, set y-limits symmetrically with generous half-range to avoid cramped panels.
+            if residual_mode:
+                limit_cfg = self.plot_params.get('limits', {})
+                min_half_v = limit_cfg.get('residual_min_half_vgsr', 60)  # km/s
+                min_half_pm = limit_cfg.get('residual_min_half_pm', 4)    # mas/yr
+                min_half_feh = limit_cfg.get('residual_min_half_feh', 0.4)
+
+                def _set_sym_resid(axh, vals, min_half):
+                    vals = np.asarray(vals)
+                    vals = vals[np.isfinite(vals)]
+                    if vals.size == 0:
+                        return
+                    half = max(np.nanmax(np.abs(vals)), min_half)
+                    axh.set_ylim(-half, half)
+
+                # Use all residuals shown on the plots (background + members) for robust limits
+                res_v = self.data.desi_data['VGSR'] - preds['desi'].get('vgsr', 0)
+                res_pmra = self.data.desi_data['PMRA'] - preds['desi'].get('pmra', 0)
+                res_pmdec = self.data.desi_data['PMDEC'] - preds['desi'].get('pmdec', 0)
+                res_feh = None
+                if 'FEH' in self.data.desi_data.columns and isinstance(preds['desi'].get('feh', None), np.ndarray):
+                    res_feh = self.data.desi_data['FEH'] - preds['desi']['feh']
+
+                # If membership probabilities exist, blend in high-probability residuals to bias toward members
+                if stream_prob is not None:
+                    hp_mask = (stream_prob >= min_prob).values if hasattr(stream_prob, 'values') else (stream_prob >= min_prob)
+                    if np.any(hp_mask):
+                        res_v = np.concatenate([np.asarray(res_v), np.asarray(res_v)[hp_mask]])
+                        res_pmra = np.concatenate([np.asarray(res_pmra), np.asarray(res_pmra)[hp_mask]])
+                        res_pmdec = np.concatenate([np.asarray(res_pmdec), np.asarray(res_pmdec)[hp_mask]])
+                        if res_feh is not None:
+                            res_feh = np.concatenate([np.asarray(res_feh), np.asarray(res_feh)[hp_mask]])
+
+                _set_sym_resid(ax[1], res_v, min_half_v)
+                _set_sym_resid(ax[2], res_pmra, min_half_pm)
+                _set_sym_resid(ax[3], res_pmdec, min_half_pm)
+                if res_feh is not None:
+                    _set_sym_resid(ax[4], res_feh, min_half_feh)
+                else:
+                    ax[4].set_ylim(-1, 1)
 
         # Set y-axis limits (non-residual mode) based on member stars OR faded blue MCMC regions (whichever extends further)
         if not residual_mode:
