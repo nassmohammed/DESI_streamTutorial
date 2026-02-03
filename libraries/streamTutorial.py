@@ -353,13 +353,17 @@ def drag_spline(
     }
 
 class Data:
-    def __init__(self, desi_path, sf_path='/raid/catalogs/streamfinder_gaiadr3.fits', cleaned_data=False, dist_path=''):
+    def __init__(self, desi_path, sf_path='/raid/catalogs/streamfinder_gaiadr3.fits', cleaned_data=False, dist_path='', **kwargs):
         self.desi_path = desi_path
         self.sf_path = sf_path
         self.cleaned_data = cleaned_data
+        self.kwargs = dict(kwargs)
+        for k, v in kwargs.items():
+            if not hasattr(self, k):
+                setattr(self, k, v)
         if not cleaned_data:
-            decals_path = '/raid/DESI/catalogs/loa/rv_output/241119/legacyphot-loa-241126.fits'
-            self.decals_data = stream_funcs.load_fits_columns(decals_path, ['EBV', 'FLUX_G', 'FLUX_R', 'FLUX_Z'])
+
+            self.decals_data = stream_funcs.load_fits_columns(self.decals_path, ['EBV', 'FLUX_G', 'FLUX_R', 'FLUX_Z'])
             # These are the columns from the DESI data that we want to import
             desired_columns = [
             'VRAD', 'VRAD_ERR', 'RVS_WARN', 'TEFF', 'LOGG', ## TEFF and LOGG needed for FeH correction
@@ -368,6 +372,12 @@ class Data:
             'TARGETID', 'PRIMARY',
             'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
             ]
+            if 'FE_H' in self.desi_data.columns:
+                self.desi_data['FEH'] = self.desi_data['FE_H']
+                self.desi_data.drop(columns=['FE_H'], inplace=True)
+                if 'FE_H_ERR' in self.desi_data.columns:
+                    self.desi_data['FEH_ERR'] = self.desi_data['FE_H_ERR']
+                    self.desi_data.drop(columns=['FE_H_ERR'], inplace=True)
             desi_hdu_indices = [1,3,4]
             self.desi_vrad_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
             self.desi_vrad_data.label='DESI'
@@ -1048,7 +1058,7 @@ class stream:
         """
         Placeholder for isochrone fitting logic.
         """
-        dotter_directory='./data/dotter/' if self.local else '/home/jupyter-nasserm/raid/nasserm/data/dotter/'
+        dotter_directory='./data/dotter/'
         mass_fraction = 0.0181 * 10 ** metallicity
         print(f'Mass Fraction (Z): {mass_fraction}')
 
