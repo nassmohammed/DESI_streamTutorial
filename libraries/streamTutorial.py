@@ -129,6 +129,100 @@ def corner_presentation_kwargs(scale=1.0):
         'max_n_ticks': 4,
     }
 
+
+def _build_expanded_param_labels(meta_obj):
+        """Return parameter labels that exactly match the flattened chain length."""
+
+        array_lengths = list(getattr(meta_obj, 'array_lengths', []))
+        labels: list[str] = []
+
+        # Helper to consume the next length from array_lengths with validation
+        idx = 0
+
+        def pop_length(expected_label: str | None = None) -> int:
+            nonlocal idx
+            if idx >= len(array_lengths):
+                raise ValueError(
+                    "array_lengths is shorter than expected when constructing parameter labels"
+                )
+            length = int(array_lengths[idx])
+            idx += 1
+            if length < 1:
+                raise ValueError(
+                    f"Invalid array length {length} for parameter group"
+                    + (f" '{expected_label}'" if expected_label else '')
+                )
+            return length
+
+        def extend_series(prefix: str, count: int, *, single_label: str | None = None):
+            if count == 1:
+                label = single_label if single_label is not None else f'{prefix}1'
+                labels.append(label)
+            else:
+                for i in range(1, count + 1):
+                    labels.append(f'{prefix}{i}')
+
+        if array_lengths:
+            # pstream block
+            pstream_len = pop_length('pstream')
+            extend_series('pstream', pstream_len, single_label='pstream')
+
+            # VGSR spline points
+            vgsr_len = pop_length('vgsr')
+            extend_series('vgsr', vgsr_len)
+
+            # lsigv block (log sigma of VGSR)
+            lsigv_len = pop_length('lsigvgsr')
+            if lsigv_len == 1:
+                labels.append('lsigvgsr')
+            else:
+                labels.append('lsigvgsr')
+                for i in range(2, lsigv_len + 1):
+                    labels.append(f'lsigvgsr{i}')
+
+            # Fixed-length scalar parameters
+            labels.append('feh1')
+            if pop_length('feh1') != 1:
+                raise ValueError('Expected feh1 to have exactly one element')
+            labels.append('lsigfeh')
+            if pop_length('lsigfeh') != 1:
+                raise ValueError('Expected lsigfeh to have exactly one element')
+
+            # PMRA spline points
+            pmra_len = pop_length('pmra')
+            extend_series('pmra', pmra_len)
+
+            if meta_obj.lsigpm_ is None:
+                lsigpmra_len = pop_length('lsigpmra')
+                if lsigpmra_len != 1:
+                    raise ValueError('Expected lsigpmra to have exactly one element')
+                labels.append('lsigpmra')
+
+            # PMDEC spline points
+            pmdec_len = pop_length('pmdec')
+            extend_series('pmdec', pmdec_len)
+
+            if meta_obj.lsigpm_ is None:
+                lsigpmdec_len = pop_length('lsigpmdec')
+                if lsigpmdec_len != 1:
+                    raise ValueError('Expected lsigpmdec to have exactly one element')
+                labels.append('lsigpmdec')
+
+            # Background scalars (order matches MCMeta.p0_guess)
+            bg_labels = ['bv', 'lsigbv', 'bfeh', 'lsigbfeh', 'bpmra', 'lsigbpmra', 'bpmdec', 'lsigbpmdec']
+            for name in bg_labels:
+                if pop_length(name) != 1:
+                    raise ValueError(f"Expected {name} to have exactly one element")
+                labels.append(name)
+
+            if idx != len(array_lengths):
+                raise ValueError(
+                    f"array_lengths has {len(array_lengths)} entries but only {idx} were consumed while "
+                    "building labels"
+                )
+
+            return labels
+
 # -----------------------------
 # Interactive spline utilities
 # -----------------------------
@@ -1089,29 +1183,39 @@ class stream:
         self.dotter_g_mp = dotter_mp[:,6]
         self.dotter_r_mp = dotter_mp[:,7]
 
-        if np.round(self.min_dist,4) != 1:
-            # interpolate distance
-            interpolate_distances = interp1d(self.data.SoI_galstream.gal_phi1, self.data.SoI_galstream.track.distance.value*1000, kind='linear', fill_value='extrapolate')
-            distance_sf = interpolate_distances(self.data.confirmed_sf_and_desi['phi1']) if not self.data.confirmed_sf_and_desi.empty else np.array([])
-            distance_desi = interpolate_distances(self.data.desi_data['phi1'])
-            distance_cut_sf = interpolate_distances(self.data.cut_confirmed_sf_and_desi['phi1']) if hasattr(self.data, 'cut_confirmed_sf_and_desi') and not self.data.cut_confirmed_sf_and_desi.empty else np.array([])
-            print('Using distance gradient')
-        elif not self.data.confirmed_sf_and_desi.empty:
-            distance_sf = 1/np.nanmean(self.data.confirmed_sf_and_desi['PARALLAX'])*1000
-            distance_desi = distance_sf
-            distance_cut_sf = 1/np.nanmean(self.data.cut_confirmed_sf_and_desi['PARALLAX'])*1000 if hasattr(self.data, 'cut_confirmed_sf_and_desi') else None
-            print(f'set distance to {distance_sf} pc')
+        #TODO fix this crap
+
+        if hasattr(self, 'dist_override'):
+            if self.dist_override == True:
+                print('Overriding distances, using user defined min_dist')
+                distance_desi = self.min_dist*1000
+                distance_sf = self.min_dist*1000
+                distance_cut_sf = self.min_dist*1000
+
         else:
-            # Galstreams-only mode: use galstream distance for DESI data
-            if hasattr(self.data, 'SoI_galstream') and self.data.SoI_galstream is not None:
+            if np.round(self.min_dist,4) != 1:
+                # interpolate distance
                 interpolate_distances = interp1d(self.data.SoI_galstream.gal_phi1, self.data.SoI_galstream.track.distance.value*1000, kind='linear', fill_value='extrapolate')
+                distance_sf = interpolate_distances(self.data.confirmed_sf_and_desi['phi1']) if not self.data.confirmed_sf_and_desi.empty else np.array([])
                 distance_desi = interpolate_distances(self.data.desi_data['phi1'])
-                distance_sf = np.array([])
-                distance_cut_sf = np.array([])
-                print('Using galstreams distance gradient for DESI data')
+                distance_cut_sf = interpolate_distances(self.data.cut_confirmed_sf_and_desi['phi1']) if hasattr(self.data, 'cut_confirmed_sf_and_desi') and not self.data.cut_confirmed_sf_and_desi.empty else np.array([])
+                print('Using distance gradient')
+            elif not self.data.confirmed_sf_and_desi.empty:
+                distance_sf = 1/np.nanmean(self.data.confirmed_sf_and_desi['PARALLAX'])*1000
+                distance_desi = distance_sf
+                distance_cut_sf = 1/np.nanmean(self.data.cut_confirmed_sf_and_desi['PARALLAX'])*1000 if hasattr(self.data, 'cut_confirmed_sf_and_desi') else None
+                print(f'set distance to {distance_sf} pc')
             else:
-                print('No distance for the stream, go look in literature and set manually with self.min_dist = XX') #kpc)
-                return
+                # Galstreams-only mode: use galstream distance for DESI data
+                if hasattr(self.data, 'SoI_galstream') and self.data.SoI_galstream is not None:
+                    interpolate_distances = interp1d(self.data.SoI_galstream.gal_phi1, self.data.SoI_galstream.track.distance.value*1000, kind='linear', fill_value='extrapolate')
+                    distance_desi = interpolate_distances(self.data.desi_data['phi1'])
+                    distance_sf = np.array([])
+                    distance_cut_sf = np.array([])
+                    print('Using galstreams distance gradient for DESI data')
+                else:
+                    print('No distance for the stream, go look in literature and set manually with self.min_dist = XX') #kpc)
+                    return
         self.data.desi_colour_idx, self.data.desi_abs_mag, self.data.desi_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.desi_data['EBV'], self.data.desi_data['FLUX_G'], self.data.desi_data['FLUX_R'], distance_desi)
         if not self.data.confirmed_sf_and_desi.empty:
             self.data.sf_colour_idx, self.data.sf_abs_mag, self.data.sf_r_mag = stream_funcs.get_colour_index_and_abs_mag(self.data.confirmed_sf_and_desi['EBV'], self.data.confirmed_sf_and_desi['FLUX_G'], self.data.confirmed_sf_and_desi['FLUX_R'], distance_sf)
@@ -2722,16 +2826,23 @@ class StreamPlotter:
                 if hasattr(self.mcmeta, 'phi1_spline_points'):
                     try:
                         # VGSR spline
+                        if len(self.mcmeta.phi1_spline_points) > 3:
+                            k = 3
+                        elif len(self.mcmeta.phi1_spline_points) <= 3:
+                            k = len(self.mcmeta.phi1_spline_points)-1
+                        else:
+                            k=2
+                        
                         vgsr_initial = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            self.mcmeta.initial_params['vgsr_spline_points'], k=2
+                            self.mcmeta.initial_params['vgsr_spline_points'], k=k
                         )
                         if 'vgsr_spline_points' in self.mcmeta.initial_params and 'vgsr' in locals():
                             pass
                         # Residual vs MCMC if applicable
                         if 'vgsr_knots' in locals() and 'residual_mode' in locals() and residual_mode:
                             vgsr_mcmc_eval = stream_funcs.apply_spline(
-                                phi1_spline_plot, self.mcmeta.phi1_spline_points, vgsr_knots, k=2
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, vgsr_knots, k=k
                             )
                             vgsr_initial_plot = vgsr_initial - vgsr_mcmc_eval
                         else:
@@ -2745,7 +2856,7 @@ class StreamPlotter:
                         # Add circle markers at spline points
                         if 'vgsr_knots' in locals() and residual_mode:
                             vgsr_mcmc_knots = stream_funcs.apply_spline(
-                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, vgsr_knots, k=2
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, vgsr_knots, k=k
                             )
                             vgsr_init_knots_scatter = self.mcmeta.initial_params['vgsr_spline_points'] - vgsr_mcmc_knots
                         else:
@@ -2759,11 +2870,11 @@ class StreamPlotter:
                         # PMRA spline
                         pmra_initial = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            self.mcmeta.initial_params['pmra_spline_points'], k=2
+                            self.mcmeta.initial_params['pmra_spline_points'], k=k
                         )
                         if 'pmra_knots' in locals() and 'residual_mode' in locals() and residual_mode:
                             pmra_mcmc_eval = stream_funcs.apply_spline(
-                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmra_knots, k=2
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmra_knots, k=k
                             )
                             pmra_initial_plot = pmra_initial - pmra_mcmc_eval
                         else:
@@ -2777,7 +2888,7 @@ class StreamPlotter:
                         # Add circle markers at spline points
                         if 'pmra_knots' in locals() and residual_mode:
                             pmra_mcmc_knots = stream_funcs.apply_spline(
-                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmra_knots, k=2
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmra_knots, k=k
                             )
                             pmra_init_knots_scatter = self.mcmeta.initial_params['pmra_spline_points'] - pmra_mcmc_knots
                         else:
@@ -2791,11 +2902,11 @@ class StreamPlotter:
                         # PMDEC spline
                         pmdec_initial = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            self.mcmeta.initial_params['pmdec_spline_points'], k=2
+                            self.mcmeta.initial_params['pmdec_spline_points'], k=k
                         )
                         if 'pmdec_knots' in locals() and 'residual_mode' in locals() and residual_mode:
                             pmdec_mcmc_eval = stream_funcs.apply_spline(
-                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmdec_knots, k=2
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmdec_knots, k=k
                             )
                             pmdec_initial_plot = pmdec_initial - pmdec_mcmc_eval
                         else:
@@ -2809,7 +2920,7 @@ class StreamPlotter:
                         # Add circle markers at spline points
                         if 'pmdec_knots' in locals() and residual_mode:
                             pmdec_mcmc_knots = stream_funcs.apply_spline(
-                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmdec_knots, k=2
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmdec_knots, k=k
                             )
                             pmdec_init_knots_scatter = self.mcmeta.initial_params['pmdec_spline_points'] - pmdec_mcmc_knots
                         else:
@@ -2840,14 +2951,20 @@ class StreamPlotter:
             if show_optimized_splines and hasattr(self.mcmeta, 'optimized_params'):
                 if hasattr(self.mcmeta, 'phi1_spline_points'):
                     try:
+                        if len(self.mcmeta.phi1_spline_points) > 3:
+                            k = 3
+                        elif len(self.mcmeta.phi1_spline_points) <= 3:
+                            k = len(self.mcmeta.phi1_spline_points)-1
+                        else:
+                            k=2
                         # VGSR spline
                         vgsr_optimized = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            self.mcmeta.optimized_params['vgsr_spline_points'], k=2
+                            self.mcmeta.optimized_params['vgsr_spline_points'], k=k
                         )
                         if 'vgsr_knots' in locals() and 'residual_mode' in locals() and residual_mode:
                             vgsr_mcmc_eval = stream_funcs.apply_spline(
-                                phi1_spline_plot, self.mcmeta.phi1_spline_points, vgsr_knots, k=2
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, vgsr_knots, k=k
                             )
                             vgsr_optimized_plot = vgsr_optimized - vgsr_mcmc_eval
                         else:
@@ -2861,7 +2978,7 @@ class StreamPlotter:
                         # Add circle markers at spline points
                         if 'vgsr_knots' in locals() and 'residual_mode' in locals() and residual_mode:
                             vgsr_mcmc_knots = stream_funcs.apply_spline(
-                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, vgsr_knots, k=2
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, vgsr_knots, k=k
                             )
                             vgsr_knots_scatter = self.mcmeta.optimized_params['vgsr_spline_points'] - vgsr_mcmc_knots
                         else:
@@ -2875,11 +2992,11 @@ class StreamPlotter:
                         # PMRA spline
                         pmra_optimized = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            self.mcmeta.optimized_params['pmra_spline_points'], k=2
+                            self.mcmeta.optimized_params['pmra_spline_points'], k=k
                         )
                         if 'pmra_knots' in locals() and 'residual_mode' in locals() and residual_mode:
                             pmra_mcmc_eval = stream_funcs.apply_spline(
-                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmra_knots, k=2
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmra_knots, k=k
                             )
                             pmra_optimized_plot = pmra_optimized - pmra_mcmc_eval
                         else:
@@ -2893,7 +3010,7 @@ class StreamPlotter:
                         # Add circle markers at spline points
                         if 'pmra_knots' in locals() and 'residual_mode' in locals() and residual_mode:
                             pmra_mcmc_knots = stream_funcs.apply_spline(
-                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmra_knots, k=2
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmra_knots, k=k
                             )
                             pmra_knots_scatter = self.mcmeta.optimized_params['pmra_spline_points'] - pmra_mcmc_knots
                         else:
@@ -2907,11 +3024,11 @@ class StreamPlotter:
                         # PMDEC spline
                         pmdec_optimized = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            self.mcmeta.optimized_params['pmdec_spline_points'], k=2
+                            self.mcmeta.optimized_params['pmdec_spline_points'], k=k
                         )
                         if 'pmdec_knots' in locals() and 'residual_mode' in locals() and residual_mode:
                             pmdec_mcmc_eval = stream_funcs.apply_spline(
-                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmdec_knots, k=2
+                                phi1_spline_plot, self.mcmeta.phi1_spline_points, pmdec_knots, k=k
                             )
                             pmdec_optimized_plot = pmdec_optimized - pmdec_mcmc_eval
                         else:
@@ -2925,7 +3042,7 @@ class StreamPlotter:
                         # Add circle markers at spline points
                         if 'pmdec_knots' in locals() and 'residual_mode' in locals() and residual_mode:
                             pmdec_mcmc_knots = stream_funcs.apply_spline(
-                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmdec_knots, k=2
+                                self.mcmeta.phi1_spline_points, self.mcmeta.phi1_spline_points, pmdec_knots, k=k
                             )
                             pmdec_knots_scatter = self.mcmeta.optimized_params['pmdec_spline_points'] - pmdec_mcmc_knots
                         else:
@@ -2954,7 +3071,12 @@ class StreamPlotter:
             
             # Plot MCMC splines in blue (requires external meds dictionary with MCMC results)
             if show_mcmc_splines and hasattr(self.mcmeta, 'phi1_spline_points'):
-                        
+                        if len(self.mcmeta.phi1_spline_points) > 3:
+                            k = 3
+                        elif len(self.mcmeta.phi1_spline_points) <= 3:
+                            k = len(self.mcmeta.phi1_spline_points)-1
+                        else:
+                            k=2
                             
                         # Extract spline points from meds dictionary
                         no_of_spline_points = len(self.mcmeta.phi1_spline_points)
@@ -3035,7 +3157,7 @@ class StreamPlotter:
 
                                 lsigv_k = getattr(meta_obj, 'spline_k_lsigv', None)
                                 if lsigv_k is None:
-                                    lsigv_k = getattr(meta_obj, 'spline_k', 2)
+                                    lsigv_k = k
 
                                 sigma_log = stream_funcs.apply_spline(
                                     phi1_spline_plot,
@@ -3070,7 +3192,7 @@ class StreamPlotter:
                         # PMRA spline
                         pmra_mcmc = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            pmra_mcmc_points, k=2
+                            pmra_mcmc_points, k=k
                         )
                         if residual_mode:
                             ax[2].axhline(0, color='blue', linewidth=2, alpha=0.8, label='MCMC Spline (resid)')
@@ -3119,7 +3241,7 @@ class StreamPlotter:
                         # PMDEC spline
                         pmdec_mcmc = stream_funcs.apply_spline(
                             phi1_spline_plot, self.mcmeta.phi1_spline_points, 
-                            pmdec_mcmc_points, k=2
+                            pmdec_mcmc_points, k=k
                         )
                         if residual_mode:
                             ax[3].axhline(0, color='blue', linewidth=2, alpha=0.8, label='MCMC Spline (resid)')
@@ -3328,6 +3450,86 @@ class StreamPlotter:
             
         return fig, ax
     
+    def show_gaussians(self, show_model=True, show_total=True, param_source=None):
+        from scipy.stats import truncnorm, norm
+        colors = list(plt.rcParams["axes.prop_cycle"].by_key()["color"])
+
+        if param_source is None:
+            param_source = self.mcmeta.initial_params
+        
+        if hasattr(self.mcmeta, 'initial_params'):
+            stream_weight = param_source['pstream']
+        else:
+            n_stream = len(sf_data) if len(sf_data) > 0 else 1
+            n_total = len(desi_data)
+            stream_weight = n_stream / n_total
+
+
+        # ----- # vgsr
+        
+        vgsr_range = np.linspace(self.mcmeta.truncation_params['vgsr_min'], 
+                                    self.mcmeta.truncation_params['vgsr_max'], 2000)
+        
+        stream_vgsr_mean = np.mean(param_source['vgsr_spline_points'])
+        lsigv_init = np.atleast_1d(param_source['lsigvgsr'])
+        stream_vgsr_std = float(np.mean(10**lsigv_init))
+
+        vgsr_a = (self.mcmeta.truncation_params['vgsr_min'] - stream_vgsr_mean) / stream_vgsr_std
+        vgsr_b = (self.mcmeta.truncation_params['vgsr_max'] - stream_vgsr_mean) / stream_vgsr_std
+        stream_vgsr_pdf = norm.pdf(vgsr_range, loc=stream_vgsr_mean, scale=stream_vgsr_std)
+        b_vgsr_pdf =  truncnorm.pdf(vgsr_range, vgsr_a, vgsr_b, loc=param_source['bv'], scale=10**param_source['lsigbv'])
+
+        # ----- # feh
+
+        feh_range = np.linspace(self.mcmeta.truncation_params['feh_min'], 
+                                    self.mcmeta.truncation_params['feh_max'], 2000)
+        stream_feh_pdf = norm.pdf(feh_range, loc=param_source['feh1'], scale=10**param_source['lsigfeh'])
+        feh_a = (self.mcmeta.truncation_params['feh_min'] - param_source['bfeh']) / (10**param_source['lsigbfeh'])
+        feh_b = (self.mcmeta.truncation_params['feh_max'] - param_source['bfeh']) / (10**param_source['lsigbfeh'])
+        b_feh_pdf = truncnorm.pdf(feh_range, feh_a, feh_b, loc=param_source['bfeh'], scale=10**param_source['lsigbfeh'])
+
+
+        # ----- # pmra
+
+        pmra_range = np.linspace(self.mcmeta.truncation_params['pmra_min'], 
+                                    self.mcmeta.truncation_params['pmra_max'], 2000)
+        stream_pmra_pdf = norm.pdf(pmra_range, loc=param_source['pmra_spline_points'].mean(), scale=10**param_source['lsigpmra'])
+        pmra_a = (self.mcmeta.truncation_params['pmra_min'] - param_source['bpmra']) / (10**param_source['lsigbpmra'])
+        pmra_b = (self.mcmeta.truncation_params['pmra_max'] - param_source['bpmra']) / (10**param_source['lsigbpmra'])
+        b_pmra_pdf = truncnorm.pdf(pmra_range, pmra_a, pmra_b, loc=param_source['bpmra'], scale=10**param_source['lsigbpmra'])
+
+
+        # ----- # pmdec
+
+        pmdec_range = np.linspace(self.mcmeta.truncation_params['pmdec_min'], 
+                                    self.mcmeta.truncation_params['pmdec_max'], 2000)
+        stream_pmdec_pdf = norm.pdf(pmdec_range, loc=param_source['pmdec_spline_points'].mean(), scale=10**param_source['lsigpmdec'])
+        pmdec_a = (self.mcmeta.truncation_params['pmdec_min'] - param_source['bpmdec']) / (10**param_source['lsigbpmdec'])
+        pmdec_b = (self.mcmeta.truncation_params['pmdec_max'] - param_source['bpmdec']) / (10**param_source['lsigbpmdec'])
+        b_pmdec_pdf = truncnorm.pdf(pmdec_range, pmdec_a, pmdec_b, loc=param_source['bpmdec'], scale=10**param_source['lsigbpmdec'])
+
+        # ----- # plotting
+
+        fig, axes = plt.subplots(2, 2, figsize=(9,9))
+
+        axes[0, 0].plot(vgsr_range, 10*stream_weight* stream_vgsr_pdf/stream_vgsr_pdf.max(), color=colors[0], ls='dashed', lw=2)
+
+        axes[0, 0].plot(vgsr_range, b_vgsr_pdf/ b_vgsr_pdf.max(), color=colors[1], ls='dashed', lw=2)
+        a =  b_vgsr_pdf[-1]/ b_vgsr_pdf.max()
+        y0, y1 = axes[0,0].get_ylim()
+        axes[0,0].axvline(vgsr_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+
+        axes[0, 0].set_xlabel('VGSR (km/s)')
+
+        axes[0, 1].plot(feh_range, 10*stream_weight* stream_feh_pdf/stream_feh_pdf.max(), color=colors[0], ls='dashed', lw=2)
+        axes[0, 1].plot(feh_range, b_feh_pdf/ b_feh_pdf.max(), color=colors[1], ls='dashed', lw=2)
+        a =  b_feh_pdf[-1]/ b_feh_pdf.max()
+        y0, y1 = axes[0,1].get_ylim()
+        axes[0,1].axvline(feh_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        axes[0, 1].set_xlabel('[Fe/H]')
+
+        return fig, axes
+    
     def gaussian_mixture_plot(self, showStream=True, background=True, save=False, show_model=True, show_total=True):
         """
         Plots Gaussian mixture model distributions for stream vs background in 4 dimensions:
@@ -3354,11 +3556,15 @@ class StreamPlotter:
         bins = 50
         
         # Estimate mixture weights
-        n_stream = len(sf_data) if len(sf_data) > 0 else 1
-        n_total = len(desi_data)
-        stream_weight = n_stream / n_total
+        if hasattr(self.mcmeta, 'initial_params'):
+            stream_weight = self.mcmeta.initial_params['pstream']
+        else:
+            n_stream = len(sf_data) if len(sf_data) > 0 else 1
+            n_total = len(desi_data)
+            stream_weight = n_stream / n_total
+
         bg_weight = 1 - stream_weight
-        
+            
         # VGSR plot (top left)
         ax = axes[0, 0]
         if background:
@@ -3435,11 +3641,12 @@ class StreamPlotter:
         stream_a = (self.mcmeta.truncation_params['feh_min'] - stream_feh_mean) / stream_feh_std
         stream_b = (self.mcmeta.truncation_params['feh_max'] - stream_feh_mean) / stream_feh_std
         stream_feh_pdf = truncnorm.pdf(feh_range, stream_a, stream_b, loc=stream_feh_mean, scale=stream_feh_std)
-        
+        print(self.mcmeta.truncation_params['feh_max'])
         # Background truncated normal
         bg_a = (self.mcmeta.truncation_params['feh_min'] - bg_feh_mean) / bg_feh_std
         bg_b = (self.mcmeta.truncation_params['feh_max'] - bg_feh_mean) / bg_feh_std
         bg_feh_pdf = truncnorm.pdf(feh_range, bg_a, bg_b, loc=bg_feh_mean, scale=bg_feh_std)
+        print(bg_feh_mean)
         if show_model:
             ax.plot(feh_range, stream_weight * stream_feh_pdf, ':', color=colors[0], lw=3, zorder=2)
             ax.plot(feh_range, bg_weight * bg_feh_pdf, ':', color=colors[1], lw=3, zorder=2)
@@ -3918,7 +4125,7 @@ class MCMeta:
         )
         # Run optimization
         print("Running optimization...")
-        self.sp_result = sp.optimize.minimize(self.optfunc, self.flat_p0_guess, method=method, options={'maxiter': 20000})
+        self.sp_result = sp.optimize.minimize(self.optfunc, self.flat_p0_guess, method=method, options={'maxiter': 20000}, bounds=self.prior_arr)
         print(self.sp_result.message)
 
         self.reshaped_result = stream_funcs.reshape_arr(self.sp_result.x, self.array_lengths)
