@@ -862,7 +862,8 @@ def register_kinematic_masks(selection, cfg, streamfinder_df):
     """
     Register standard kinematic masks on a Selection.
 
-    All masks are always defined; users choose which ones to apply later via Selection.get_masks().
+    Masks are defined based on available inputs; users choose which ones to apply later
+    via Selection.get_masks().
 
     Expected cfg structure:
         cfg = {
@@ -881,6 +882,8 @@ def register_kinematic_masks(selection, cfg, streamfinder_df):
                 'pmdec_box': (min, max),
             },
         }
+    streamfinder_df can be None. In that case, StreamFinder-based masks
+    ('PMRA_SF', 'PMDEC_SF') are not registered.
     """
     if selection is None or cfg is None:
         raise ValueError("Selection and cfg must be provided.")
@@ -910,6 +913,13 @@ def register_kinematic_masks(selection, cfg, streamfinder_df):
         y_hi = streamfinder_df.loc[streamfinder_df['phi1'].idxmax(), field]
         return phi_lo, phi_hi, y_lo, y_hi
 
+    has_streamfinder = (
+        streamfinder_df is not None
+        and hasattr(streamfinder_df, 'empty')
+        and not streamfinder_df.empty
+        and all(col in streamfinder_df.columns for col in ('phi1', 'pmRA', 'pmDE'))
+    )
+
     # --- VGSR spline mask ---
     if 'vgsr' in spline_cfg:
         vs = spline_cfg['vgsr']
@@ -918,13 +928,14 @@ def register_kinematic_masks(selection, cfg, streamfinder_df):
 
     # --- PMRA masks ---
     pmra_wiggle_sf = sf_cfg.get('pmra_wiggle', 0)
-    phi_lo, phi_hi, pmra_lo, pmra_hi = _streamfinder_endpoints('pmRA')
-    selection.add_mask(
-        'PMRA_SF',
-        lambda df, wiggle=pmra_wiggle_sf, phi_lo=phi_lo, phi_hi=phi_hi, pm_lo=pmra_lo, pm_hi=pmra_hi:
-            (df['PMRA'] >= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo - wiggle, pm_hi - wiggle])) &
-            (df['PMRA'] <= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo + wiggle, pm_hi + wiggle]))
-    )
+    if has_streamfinder:
+        phi_lo, phi_hi, pmra_lo, pmra_hi = _streamfinder_endpoints('pmRA')
+        selection.add_mask(
+            'PMRA_SF',
+            lambda df, wiggle=pmra_wiggle_sf, phi_lo=phi_lo, phi_hi=phi_hi, pm_lo=pmra_lo, pm_hi=pmra_hi:
+                (df['PMRA'] >= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo - wiggle, pm_hi - wiggle])) &
+                (df['PMRA'] <= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo + wiggle, pm_hi + wiggle]))
+        )
 
     if 'pmra' in spline_cfg:
         ps = spline_cfg['pmra']
@@ -933,13 +944,14 @@ def register_kinematic_masks(selection, cfg, streamfinder_df):
 
     # --- PMDEC masks ---
     pmdec_wiggle_sf = sf_cfg.get('pmdec_wiggle', 0)
-    phi_lo, phi_hi, pmdec_lo, pmdec_hi = _streamfinder_endpoints('pmDE')
-    selection.add_mask(
-        'PMDEC_SF',
-        lambda df, wiggle=pmdec_wiggle_sf, phi_lo=phi_lo, phi_hi=phi_hi, pm_lo=pmdec_lo, pm_hi=pmdec_hi:
-            (df['PMDEC'] >= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo - wiggle, pm_hi - wiggle])) &
-            (df['PMDEC'] <= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo + wiggle, pm_hi + wiggle]))
-    )
+    if has_streamfinder:
+        phi_lo, phi_hi, pmdec_lo, pmdec_hi = _streamfinder_endpoints('pmDE')
+        selection.add_mask(
+            'PMDEC_SF',
+            lambda df, wiggle=pmdec_wiggle_sf, phi_lo=phi_lo, phi_hi=phi_hi, pm_lo=pmdec_lo, pm_hi=pmdec_hi:
+                (df['PMDEC'] >= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo - wiggle, pm_hi - wiggle])) &
+                (df['PMDEC'] <= np.interp(df['phi1'], [phi_lo, phi_hi], [pm_lo + wiggle, pm_hi + wiggle]))
+        )
 
     if 'pmdec' in spline_cfg:
         ps = spline_cfg['pmdec']
