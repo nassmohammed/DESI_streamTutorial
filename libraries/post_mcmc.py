@@ -21,11 +21,11 @@ from types import SimpleNamespace
 import gallery_functions as gallery_funcs
 importlib.reload(gallery_funcs)
 from stream_functions import apply_spline
-import scripts.vdisp as vdisp
+import vdisp
 import os
 import corner
 import polars as pl
-from scripts.streamTutorial import StreamPlotter
+from streamTutorial import StreamPlotter
 
 SPLINE_ZORDER = -5
 ERROR_BAR_ZORDER = -2
