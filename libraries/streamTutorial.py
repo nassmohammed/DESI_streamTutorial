@@ -1462,11 +1462,15 @@ class StreamPlotter:
         import astropy.coordinates as ac
         mwsts = self.stream.mwsts
         tnames = mwsts.get_track_names_in_sky_window([np.nanmin(self.data.desi_data['TARGET_RA']), np.nanmax(self.data.desi_data['TARGET_RA'])]*u.deg, [np.nanmin(self.data.desi_data['TARGET_DEC']), np.nanmax(self.data.desi_data['TARGET_DEC'])]*u.deg, frame=ac.ICRS, 
-                                           On_only=False, wrap_angle=180.*u.deg)
+                                           On_only=True)#, wrap_angle=180.*u.deg)
         fig, ax = plt.subplots(1,1, figsize=(7,3))
         ax.scatter(self.data.desi_data['TARGET_RA'], self.data.desi_data['TARGET_DEC'], color='k', s=1, label='DESI data', alpha=0.05)
-        for st in tnames:
-            ax.plot(mwsts[st].track.ra, mwsts[st].track.dec, '-o', ms=2., label=st)
+        linestyles = ['-', '--', ':', '-.']
+
+        for i, st in enumerate(tnames):
+            ls = linestyles[i % len(linestyles)]
+            ax.plot(mwsts[st].track.ra,mwsts[st].track.dec,linestyle=ls,label=st)
+
         ax.set_xlim(np.nanmin(self.data.desi_data['TARGET_RA'])-2, np.nanmax(self.data.desi_data['TARGET_RA'])+2)
         ax.set_ylim(np.nanmin(self.data.desi_data['TARGET_DEC'])-2, np.nanmax(self.data.desi_data['TARGET_DEC'])+2)
         ax.set_xlabel('RA [deg]')

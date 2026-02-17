@@ -1647,7 +1647,34 @@ def call_likelihood(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err,
                      trunc_fit=False, assert_prior=False, feh_fit=True, k=2, reshape_arr_shape=None,
                      vgsr_trunc=[-np.inf, np.inf], feh_trunc=[-np.inf, np.inf], pmra_trunc=[-np.inf, np.inf],
                      pmdec_trunc=[-np.inf, np.inf], **kwargs):
-    lsigpm_ = kwargs.get('lsigpm_set', None)
+    """
+    Docstring for call_likelihood
+    
+    :param theta: guess/step for parameters
+    :param prior: prior ranges for each parameter
+    :param spline_x_points: location in phi1 for spline knots
+    :param vgsr: data galactocentric velocity value
+    :param vgsr_err: data galactocentric velocity error
+    :param feh: data metallicity
+    :param feh_err: data metallicity error
+    :param pmra: data proper motion in right ascension
+    :param pmra_err: data proper motion in right ascension error
+    :param pmdec: data proper motion in declination
+    :param pmdec_err: data proper motion in declination error
+    :param phi1: data phi1 coordinate in stream frame
+    :param trunc_fit: Boolean, if True data has been truncated
+    :param assert_prior: Boolean, Throw a fit if a parameter is out of prior range
+    :param feh_fit: Boolean, If we're including metallicity in fit
+    :param k: order of polynomial for splines
+    :param reshape_arr_shape: array in the shape of the nested parameters
+    :param vgsr_trunc: min and max of truncation
+    :param feh_trunc: min and max of truncation
+    :param pmra_trunc: min and max of truncation
+    :param pmdec_trunc: min and max of truncation
+
+    
+    """
+    lsigpm_ = kwargs.get('lsigpm_set', None) #if  we're fixing the dispersion in proper motions to some value
     reshaped_theta = reshape_arr(theta, reshape_arr_shape)
 
     pstream, vgsr_spline_points, lsigv, feh1, lsigfeh, \
@@ -1734,6 +1761,7 @@ def call_likelihood(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err,
         stats.norm.cdf(feh_trunc[1], loc=bfeh, scale=scale_bg_feh)
         - stats.norm.cdf(feh_trunc[0], loc=bfeh, scale=scale_bg_feh)
     )
+    print(lfeh_cdf_dif)
     lstream_feh = stats.norm.logpdf(feh, loc=feh1, scale=scale_stream_feh)
     lbg_feh = stats.norm.logpdf(feh, loc=bfeh, scale=scale_bg_feh) - lfeh_cdf_dif
 
@@ -1765,6 +1793,7 @@ def call_likelihood(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err,
     lbg = lbg_weight + lbg_v + lbg_feh + lbg_pmra + lbg_pmdec
 
     return lstream, lbg
+
 def lnlikelihood(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err, pmra, pmra_err, pmdec, pmdec_err, phi1,
                      trunc_fit = False, assert_prior = False, feh_fit=True, k=2, reshape_arr_shape=None, vgsr_trunc=[-np.inf, np.inf], feh_trunc=[-np.inf, np.inf], pmra_trunc=[-np.inf, np.inf], pmdec_trunc=[-np.inf, np.inf], lsigpm_set=None, **kwargs):
     lstream, lbg = call_likelihood(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err, pmra, pmra_err, pmdec, pmdec_err, phi1,
