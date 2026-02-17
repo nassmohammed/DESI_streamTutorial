@@ -1761,7 +1761,6 @@ def call_likelihood(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err,
         stats.norm.cdf(feh_trunc[1], loc=bfeh, scale=scale_bg_feh)
         - stats.norm.cdf(feh_trunc[0], loc=bfeh, scale=scale_bg_feh)
     )
-    print(lfeh_cdf_dif)
     lstream_feh = stats.norm.logpdf(feh, loc=feh1, scale=scale_stream_feh)
     lbg_feh = stats.norm.logpdf(feh, loc=bfeh, scale=scale_bg_feh) - lfeh_cdf_dif
 
