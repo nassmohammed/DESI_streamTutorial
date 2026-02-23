@@ -25,7 +25,7 @@ import vdisp
 import os
 import corner
 import polars as pl
-from streamTutorial_c19 import StreamPlotter
+from streamTutorial import StreamPlotter
 
 SPLINE_ZORDER = -5
 ERROR_BAR_ZORDER = -2
