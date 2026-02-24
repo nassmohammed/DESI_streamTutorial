@@ -1303,7 +1303,7 @@ class stream:
                 distance_sf = self.min_dist*1000
                 distance_cut_sf = self.min_dist*1000
 
-        else:
+        elif hasattr(self, 'dist_override') == False or self.dist_override == False:
             if np.round(self.min_dist,4) != 1:
                 # interpolate distance
                 interpolate_distances = interp1d(self.data.SoI_galstream.gal_phi1, self.data.SoI_galstream.track.distance.value*1000, kind='linear', fill_value='extrapolate')
