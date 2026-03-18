@@ -1094,180 +1094,9 @@ class StreamMembers:
         self.pmdec_idx = 7 if 'lsigpmra' in labels else 6
 
         print('Done')
-    
-    def _compute_axis_limits(self, active_handlers, pad):
-        """
-        Compute dynamic axis limits based on data and spline tracks.
         
-        Parameters
-        ----------
-        active_handlers : list of tuples
-            List of (label, handler, skip_msg) tuples for active data handlers
-        pad : array-like
-            Padding values for each coordinate: [vgsr, feh, pmra, pmdec, phi2]
-            
-        Returns
-        -------
-        phi1_range : tuple
-            (min, max) range for phi1 axis
-        data_ranges : dict
-            Dictionary mapping coordinate names to (min, max) ylim tuples
-        """
-        pad = np.asarray(pad, dtype=float).reshape(-1)
-        
-        # Collect all phi1 values and spline points to determine x-range
-        all_phi1 = []
-        spline_points_all = []
-        
-        # Collect data ranges for each coordinate
-        all_phi2 = []
-        all_vgsr = []
-        all_pmra = []
-        all_pmdec = []
-        all_feh = []
-        all_dist = []
-        
-        for label, handler, _ in active_handlers:
-            if handler is None or handler.data is None or len(handler.data) == 0:
-                continue
-            
-            data = handler.data
-            
-            # Collect phi1 values
-            phi1_vals = _get_numeric_array(data, 'phi1')
-            if phi1_vals is not None:
-                finite_phi1 = phi1_vals[np.isfinite(phi1_vals)]
-                if len(finite_phi1) > 0:
-                    all_phi1.extend(finite_phi1)
-            
-            # Collect spline points
-            if hasattr(handler, 'spline_points_dict') and handler.spline_points_dict is not None:
-                sp = handler.spline_points_dict.get('phi1_spline_points')
-                if sp is not None:
-                    spline_points_all.extend(np.asarray(sp).flatten())
-            
-            # Collect coordinate values
-            for vals, col_list in [
-                (all_phi2, ['phi2', 'PHI2']),
-                (all_vgsr, COLUMN_ALIASES['VGSR']),
-                (all_pmra, COLUMN_ALIASES['PMRA']),
-                (all_pmdec, COLUMN_ALIASES['PMDEC']),
-                (all_feh, COLUMN_ALIASES['FEH']),
-            ]:
-                col_vals = _pick_numeric_column(data, col_list)
-                if col_vals is not None:
-                    finite_vals = col_vals[np.isfinite(col_vals)]
-                    if len(finite_vals) > 0:
-                        vals.extend(finite_vals)
-            
-            # Distance requires special handling
-            dist_vals, _ = _extract_distance_series(data, label)
-            if dist_vals is not None:
-                dist_arr = np.asarray(dist_vals, dtype=float)
-                finite_dist = dist_arr[np.isfinite(dist_arr) & (dist_arr > 0)]
-                if len(finite_dist) > 0:
-                    all_dist.extend(finite_dist)
-        
-        # Compute phi1 range from spline points with padding
-        if len(spline_points_all) > 0:
-            phi1_min = np.min(spline_points_all) - 5
-            phi1_max = np.max(spline_points_all) + 5
-        elif len(all_phi1) > 0:
-            phi1_min = np.min(all_phi1) - 5
-            phi1_max = np.max(all_phi1) + 5
-        else:
-            # Fallback
-            phi1_min, phi1_max = -10, 40
-        
-        phi1_range = (phi1_min, phi1_max)
-        
-        # Compute y-axis ranges with padding factor
-        def _compute_ylim(values, margin_factor=0.15):
-            """Compute ylim with margin around data range."""
-            if len(values) == 0:
-                return None
-            vmin, vmax = np.min(values), np.max(values)
-            margin = (vmax - vmin) * margin_factor
-            if margin < 1e-6:
-                margin = abs(vmin) * 0.1 if vmin != 0 else 1.0
-            return (vmin - margin, vmax + margin)
-        
-        # Compute ranges for spline-tracked quantities using spline values
-        # For vgsr, pmra, pmdec: use spline track range plus padding tolerance
-        data_ranges = {}
-        
-        # phi2: symmetric around zero based on pad[4] or data range
-        if len(all_phi2) > 0:
-            phi2_extent = max(abs(np.min(all_phi2)), abs(np.max(all_phi2)), pad[4])
-            data_ranges['phi2'] = (-phi2_extent * 1.3, phi2_extent * 1.3)
-        else:
-            data_ranges['phi2'] = (-pad[4] * 2, pad[4] * 2)
-        
-        # For tracked quantities, use data range plus some margin
-        if len(all_vgsr) > 0:
-            data_ranges['vgsr'] = _compute_ylim(all_vgsr, margin_factor=0.2)
-        
-        if len(all_pmra) > 0:
-            data_ranges['pmra'] = _compute_ylim(all_pmra, margin_factor=0.3)
-        
-        if len(all_pmdec) > 0:
-            data_ranges['pmdec'] = _compute_ylim(all_pmdec, margin_factor=0.3)
-        
-        if len(all_feh) > 0:
-            data_ranges['feh'] = _compute_ylim(all_feh, margin_factor=0.2)
-        
-        if len(all_dist) > 0:
-            # For distance on log scale, use data range with some margin
-            dist_min = max(0.5, np.min(all_dist) * 0.5)
-            dist_max = np.max(all_dist) * 2.0
-            data_ranges['dist'] = (dist_min, dist_max)
-        else:
-            data_ranges['dist'] = (1, 100)  # Default fallback
-        
-        return phi1_range, data_ranges
         
     def box_cut(self, pad, with_plot=True, save_fig=False, fig_path=None, residual=True, show_panels=None, **kwargs):
-        """
-        Apply box cuts to select stream members across multiple phase-space coordinates.
-        
-        For each panel, showing one phase-space coordinate as a function of phi1, stars 
-        remaining after all other selection cuts are shown (i.e. the vgsr panel shows stars 
-        selected with phi2, metallicity, and proper motions). The dashed lines show the 
-        tolerance about the spline track fit used to select likely member stars.
-        
-        Parameters
-        ----------
-        pad : array-like
-            Tolerance values for each coordinate: [vgsr, feh, pmra, pmdec, phi2]
-        with_plot : bool, optional
-            Whether to generate the diagnostic plot (default: True)
-        save_fig : bool, optional
-            Whether to save the figure (default: False)
-        fig_path : str, optional
-            Path to save the figure if save_fig is True
-        residual : bool, optional
-            Whether to show residual panels for vgsr, pmra, pmdec (default: True)
-        show_panels : list of int, optional
-            Which panels to display. Panel indices:
-            0: phi2, 1: vgsr, 2: pmra, 3: pmdec, 4: feh, 5: dist
-            If None, all panels are shown.
-        **kwargs : dict
-            Additional keyword arguments:
-            - highlight : array-like, optional - Indices to highlight
-            - withIso : bool - Apply isochrone filter (default: True)
-            - withAss : bool - Include BHB allowance in isochrone (default: True)
-            - isochrone_path : str - Override isochrone file path
-            - iso_distance : float - Override isochrone distance (pc)
-            - xlim : tuple, optional - Override x-axis (phi1) limits
-            - ylim_phi2 : tuple, optional - Override phi2 y-axis limits
-            - ylim_vgsr : tuple, optional - Override vgsr y-axis limits  
-            - ylim_pmra : tuple, optional - Override pmra y-axis limits
-            - ylim_pmdec : tuple, optional - Override pmdec y-axis limits
-            - ylim_feh : tuple, optional - Override feh y-axis limits
-            - ylim_dist : tuple, optional - Override distance y-axis limits
-            - phi1_exclude : tuple, optional - (min, max) phi1 range to exclude from plot
-              e.g., phi1_exclude=(-0.75, 0.75) masks out stars in that range
-        """
         print('Applying box cuts...')
         highlight = kwargs.get('highlight', None)
         residual = kwargs.pop('residual', residual)
@@ -1277,21 +1106,6 @@ class StreamMembers:
         with_ass = kwargs.get('withAss', True)
         iso_path_override = kwargs.get('isochrone_path', None)
         iso_distance_override = kwargs.get('iso_distance', None)
-        
-        # Extract optional axis limit overrides
-        xlim_override = kwargs.get('xlim', None)
-        ylim_overrides = {
-            'phi2': kwargs.get('ylim_phi2', None),
-            'vgsr': kwargs.get('ylim_vgsr', None),
-            'pmra': kwargs.get('ylim_pmra', None),
-            'pmdec': kwargs.get('ylim_pmdec', None),
-            'feh': kwargs.get('ylim_feh', None),
-            'dist': kwargs.get('ylim_dist', None),
-        }
-        
-        # Extract phi1 exclusion range (e.g., to mask out a region like -0.75 to 0.75)
-        phi1_exclude = kwargs.get('phi1_exclude', None)
-        
         ms = getattr(self, 'ms_handler', None)
         bhb = getattr(self, 'bhb_handler', None)
         rrl = getattr(self, 'rrl_handler', None)
@@ -1354,27 +1168,16 @@ class StreamMembers:
             print('Plotting box cuts...')
 
             import matplotlib.gridspec as gridspec
-            
-            # Compute dynamic axis limits from data and spline tracks
-            phi1_range, data_ranges = self._compute_axis_limits(active_handlers, pad)
-            
-            # Apply user overrides if provided
-            if xlim_override is not None:
-                phi1_range = xlim_override
-            for key, override_val in ylim_overrides.items():
-                if override_val is not None:
-                    data_ranges[key] = override_val
-            
             panel_definitions = [
-                (0, 'phi2', 1.5, {'ylabel': r'$\phi_2$ (deg)', 'ylim': data_ranges.get('phi2')}, None),
-                (1, 'vgsr', 1.5, {'ylabel': r'$V_{GSR}$ (km/s)', 'ylim': data_ranges.get('vgsr')},
+                (0, 'phi2', 1.5, {'ylabel': r'$\phi_2$ (deg)', 'ylim': (-15, 15)}, None),
+                (1, 'vgsr', 1.5, {'ylabel': r'$V_{GSR}$ (km/s)', 'ylim': (-400, 350)},
                  ('dvgsr', 1.0, {'ylabel': r'$\Delta V_{GSR}$ (km/s)', 'ylim': (-pad[0]*1.5, pad[0]*1.5)})),
-                (2, 'pmra', 1.5, {'ylabel': r'$\mu_{\alpha}$ (mas/yr)', 'ylim': data_ranges.get('pmra')},
+                (2, 'pmra', 1.5, {'ylabel': r'$\mu_{\alpha}$ (mas/yr)', 'ylim': (-2, 4)},
                  ('dpmra', 1.0, {'ylabel': r'$\Delta \mu_{\alpha}$ (mas/yr)', 'ylim': (-pad[2]*1.5, pad[2]*1.5)})),
-                (3, 'pmdec', 1.5, {'ylabel': r'$\mu_{\delta}$ (mas/yr)', 'ylim': data_ranges.get('pmdec')},
+                (3, 'pmdec', 1.5, {'ylabel': r'$\mu_{\delta}$ (mas/yr)', 'ylim': (-7, 0)},
                  ('dpmdec', 1.0, {'ylabel': r'$\Delta \mu_{\delta}$ (mas/yr)', 'ylim': (-pad[3]*1.5, pad[3]*1.5)})),
-                (4, 'feh', 1.5, {'ylabel': r'[Fe/H]', 'ylim': data_ranges.get('feh')}, None),
-                (5, 'dist', 1.5, {'ylabel': 'Distance (kpc)', 'yscale': 'log', 'ylim': data_ranges.get('dist', (1, 100))}, None),
+                (4, 'feh', 1.5, {'ylabel': r'[Fe/H]'}, None),
+                (5, 'dist', 1.5, {'ylabel': 'Distance (kpc)', 'yscale': 'log', 'ylim': (1, 100)}, None),
             ]
             if show_panels is None:
                 show_set = {panel_id for panel_id, *_ in panel_definitions}
@@ -1452,7 +1255,7 @@ class StreamMembers:
                     main_ax.set_ylim(*main_props['ylim'])
                 if main_props.get('yscale'):
                     main_ax.set_yscale(main_props['yscale'])
-                main_ax.set_xlim(*phi1_range)
+                main_ax.set_xlim(-10, 40)
 
                 ax_order.append(main_ax)
                 ax_map[main_info['name']] = main_ax
@@ -1472,7 +1275,7 @@ class StreamMembers:
 
             # ensure all axes share same x-limits
             for axis in ax_order:
-                axis.set_xlim(*phi1_range)
+                axis.set_xlim(-10, 40)
 
             dist_ax = ax_map.get('dist')
             bottom_axis = dist_ax if dist_ax is not None else ax_order[-1]
@@ -1489,8 +1292,6 @@ class StreamMembers:
                         vgsr_idx=self.vgsr_idx,
                         pmra_idx=self.pmra_idx,
                         pmdec_idx=self.pmdec_idx,
-                        phi1_range=phi1_range,
-                        phi1_exclude=phi1_exclude,
                     )
                 else:
                     print(skip_msg)
@@ -1543,17 +1344,9 @@ class StreamMembers:
         vgsr_idx=1,
         pmra_idx=5,
         pmdec_idx=6,
-        phi1_range=None,
-        phi1_exclude=None,
     ):
         """
         Plot main and residual panels for a single handler selection.
-        
-        Parameters
-        ----------
-        phi1_exclude : tuple, optional
-            (min, max) phi1 range to exclude from plotting. Stars with phi1
-            values in this range will be masked out.
         """
         if handler is None or handler.data is None or len(handler.data) == 0:
             return
@@ -1588,14 +1381,6 @@ class StreamMembers:
             ('plx', _ensure_mask(handler.plx_mask)),
             ('phi1', _ensure_mask(handler.phi1_mask)),
         ])
-        
-        # Create phi1 exclusion mask if specified
-        phi1_all_for_mask = _get_numeric_array(handler.data, 'phi1')
-        if phi1_exclude is not None and phi1_all_for_mask is not None:
-            phi1_min_ex, phi1_max_ex = phi1_exclude
-            phi1_exclude_mask = ~((phi1_all_for_mask >= phi1_min_ex) & (phi1_all_for_mask <= phi1_max_ex))
-        else:
-            phi1_exclude_mask = np.ones(data_length, dtype=bool)
 
         iso_mask = np.ones(data_length, dtype=bool)
         if label == 'MS+RG':
@@ -1604,11 +1389,11 @@ class StreamMembers:
         def _combine(exclude=()):
             keys = [name for name in mask_components if name not in exclude]
             if not keys:
-                return iso_mask.copy() & phi1_exclude_mask
+                return iso_mask.copy()
             combined = mask_components[keys[0]].copy()
             for key in keys[1:]:
                 combined &= mask_components[key]
-            return combined & iso_mask & phi1_exclude_mask
+            return combined & iso_mask
 
         sel = _combine()
         sel_variants = {
@@ -1647,14 +1432,9 @@ class StreamMembers:
         facecolor_main = 'none' if label in ('BHB', 'RRL') else color
         edgecolor_main = color if label in ('BHB', 'RRL') else 'none'
 
-        # Use phi1_range if provided, otherwise compute from spline points
+        x_arr = np.arange(-10, 40, 0.1)
         spline_points = handler.spline_points_dict['phi1_spline_points']
         spline_k = handler.spline_points_dict['spline_k']
-        if phi1_range is not None:
-            x_arr = np.arange(phi1_range[0], phi1_range[1], 0.1)
-        else:
-            # Fall back to spline points range with some padding
-            x_arr = np.arange(np.min(spline_points) - 5, np.max(spline_points) + 5, 0.1)
 
         vgsr_track_dense = apply_spline(x_arr, spline_points, handler.nested_dict['meds'][vgsr_idx], spline_k)
         pmra_track_dense = apply_spline(x_arr, spline_points, handler.nested_dict['meds'][pmra_idx], spline_k)
@@ -2838,78 +2618,18 @@ class StreamMembers:
         horizontal_branch=False,
         min_prob=0.5,
         box_cut=False,
-        track=None,
     ):
-        """
-        Visualize the isochrone on a CMD with stream members.
-        
-        Parameters
-        ----------
-        color_index_wiggle : float
-            Tolerance for isochrone color matching
-        isochrone_path : str
-            Path to the Dotter isochrone file
-        return_axes : bool
-            If True, return (fig, ax) tuple
-        absolute : bool
-            If True, plot absolute magnitudes. Requires either `track` parameter
-            or will fall back to using self.min_dist.
-        horizontal_branch : bool
-            If True, include horizontal branch region
-        min_prob : float
-            Minimum probability for membership coloring
-        box_cut : bool
-            If True, use box-cut selected members
-        track : galstreams Track6D object, optional
-            A galstreams track object (e.g., mwsts.get('M92-I21').track) that 
-            provides distance as a function of position along the stream. When
-            absolute=True, the track distance will be interpolated at each star's
-            phi1 position to compute proper absolute magnitudes.
-            Example: track=mwsts.get('M92-I21').track
-        """
         def flux_to_mag(flux):
             mag = np.full_like(flux, np.nan, dtype=float)
             mask = flux > 0
             mag[mask] = 22.5 - 2.5 * np.log10(flux[mask])
             return mag
-        
-        def _get_track_distances(track, phi1_values):
-            """Interpolate track distances at given phi1 values (in kpc)."""
-            if track is None:
-                return None
-            try:
-                # Get track coordinates in stream frame
-                track_phi1, _ = stream_funcs.ra_dec_to_phi1_phi2(
-                    self.frame, 
-                    track.ra.value * u.deg, 
-                    track.dec.value * u.deg
-                )
-                track_dist = track.distance.value  # in kpc
-                
-                # Sort by phi1 for interpolation
-                sort_idx = np.argsort(track_phi1)
-                track_phi1_sorted = track_phi1[sort_idx]
-                track_dist_sorted = track_dist[sort_idx]
-                
-                # Interpolate distance at each star's phi1
-                interp_dist = np.interp(
-                    phi1_values, 
-                    track_phi1_sorted, 
-                    track_dist_sorted,
-                    left=track_dist_sorted[0],
-                    right=track_dist_sorted[-1]
-                )
-                return interp_dist  # in kpc
-            except Exception as e:
-                print(f"Warning: Could not interpolate track distances: {e}")
-                return None
 
         dotter_mp = np.loadtxt(isochrone_path)
         dotter_g_mp = dotter_mp[:, 6]
         dotter_r_mp = dotter_mp[:, 7]
 
         dm = None
-        dm_for_axis = None  # Separate dm for right axis when using track
         min_dist_attr = getattr(self, 'min_dist', None)
         try:
             _min_dist = float(min_dist_attr)
@@ -2918,17 +2638,6 @@ class StreamMembers:
         if _min_dist is not None and np.isfinite(_min_dist) and _min_dist > 0:
             distance_kpc = _min_dist / 1000.0 if _min_dist > 1000.0 else _min_dist
             dm = d2dm(distance_kpc)
-            dm_for_axis = dm  # Default to same as dm
-        
-        # If track is provided, compute dm_for_axis from median track distance
-        if track is not None:
-            try:
-                track_dist_kpc = track.distance.value  # in kpc
-                median_dist_kpc = np.median(track_dist_kpc[np.isfinite(track_dist_kpc)])
-                if np.isfinite(median_dist_kpc) and median_dist_kpc > 0:
-                    dm_for_axis = d2dm(median_dist_kpc)
-            except Exception as e:
-                print(f"Warning: Could not compute dm from track, using min_dist: {e}")
 
         if not absolute:
             if dm is None:
@@ -3018,25 +2727,8 @@ class StreamMembers:
             ebv = np.asarray(subset['EBV'])
             g_flux = np.asarray(subset['FLUX_G'])
             r_flux = np.asarray(subset['FLUX_R'])
-            
-            # Get phi1 values for track distance interpolation
-            phi1_vals = None
-            if 'phi1' in subset.columns:
-                phi1_vals = np.asarray(subset['phi1'])
-            
-            # Compute distances: use track if provided and absolute=True, else fall back
-            if absolute and track is not None and phi1_vals is not None:
-                interp_distances = _get_track_distances(track, phi1_vals)
-                if interp_distances is not None:
-                    # Convert kpc to pc for get_colour_index_and_abs_mag
-                    distances_pc = interp_distances * 1000.0
-                else:
-                    distances_pc = self.min_dist * 1000
-            else:
-                distances_pc = self.min_dist * 1000
-            
             colour_idx, abs_mag, r_mag = stream_funcs.get_colour_index_and_abs_mag(
-                ebv, g_flux, r_flux, distances_pc
+                ebv, g_flux, r_flux, self.min_dist * 1000
             )
             if not absolute:
                 _, _, r_mag = stream_funcs.get_colour_index_and_abs_mag(
@@ -3071,20 +2763,8 @@ class StreamMembers:
             stream_data = self.stream_data
             stream_ebv = np.array(stream_data['EBV'])
             stream_g_flux, stream_r_flux = np.array(stream_data['FLUX_G']), np.array(stream_data['FLUX_R'])
-            
-            # Compute distances for stream_data
-            if absolute and track is not None and 'phi1' in stream_data.colnames:
-                stream_phi1 = np.array(stream_data['phi1'])
-                interp_distances = _get_track_distances(track, stream_phi1)
-                if interp_distances is not None:
-                    stream_distances_pc = interp_distances * 1000.0
-                else:
-                    stream_distances_pc = self.min_dist * 1000
-            else:
-                stream_distances_pc = self.min_dist * 1000
-            
             stream_colour_index, stream_abs_mag, stream_r_mag = stream_funcs.get_colour_index_and_abs_mag(
-                stream_ebv, stream_g_flux, stream_r_flux, stream_distances_pc
+                stream_ebv, stream_g_flux, stream_r_flux, self.min_dist * 1000
             )
 
             if not absolute:
@@ -3247,10 +2927,10 @@ class StreamMembers:
                 ax.set_ylim(25, 10)
 
         plot_form(ax)
-        if absolute and dm_for_axis is not None:
+        if absolute and dm is not None:
             ax.tick_params(axis='y', which='both', right=False)
             right_ax = ax.twinx()
-            right_ax.set_ylim(np.array(ax.get_ylim()) + dm_for_axis)
+            right_ax.set_ylim(np.array(ax.get_ylim()) + dm)
             right_ax.set_ylabel(r'$m_r$ [mag]', fontsize=14)
             right_ax.tick_params(axis='y', which='both', direction='in', left=False, right=True)
             right_ax.minorticks_on()

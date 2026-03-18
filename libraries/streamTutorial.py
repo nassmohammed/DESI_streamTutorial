@@ -518,12 +518,12 @@ class Data:
             'TARGETID', 'PRIMARY',
             'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
             ]
-            if 'FE_H' in self.desi_data.columns:
-                self.desi_data['FEH'] = self.desi_data['FE_H']
-                self.desi_data.drop(columns=['FE_H'], inplace=True)
-                if 'FE_H_ERR' in self.desi_data.columns:
-                    self.desi_data['FEH_ERR'] = self.desi_data['FE_H_ERR']
-                    self.desi_data.drop(columns=['FE_H_ERR'], inplace=True)
+            # if 'FE_H' in self.desi_data.columns:
+            #     self.desi_data['FEH'] = self.desi_data['FE_H']
+            #     self.desi_data.drop(columns=['FE_H'], inplace=True)
+            #     if 'FE_H_ERR' in self.desi_data.columns:
+            #         self.desi_data['FEH_ERR'] = self.desi_data['FE_H_ERR']
+            #         self.desi_data.drop(columns=['FE_H_ERR'], inplace=True)
             desi_hdu_indices = [1,3,4]
             self.desi_vrad_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
             self.desi_vrad_data.label='DESI'

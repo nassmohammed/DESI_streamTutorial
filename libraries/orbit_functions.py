@@ -457,9 +457,13 @@ def plot_orbit(
         else:
             carray = np.asarray(model_dist, dtype=float)
 
+        apo_arg = np.argmax(carray)
+
         # Build line segments for coloring, avoid RA wrap jumps
         x = model_ra_rad
         y = model_dec_rad
+        apo_x = x[apo_arg]
+        apo_y = y[apo_arg]
         dra = np.abs(np.diff(x))
         good = dra < (np.pi / 1.5)
         seg_x = np.column_stack([x[:-1], x[1:]])[good]
@@ -480,7 +484,8 @@ def plot_orbit(
     else:
         # Fallback: single-color model orbit when distances are not provided
         ax.scatter(model_ra_rad, model_dec_rad, c='r', s=0.5, zorder=1)
-
+    ax.scatter(apo_x, apo_y, c='green', s=50, marker='*', label='Apocenter', zorder=3)
+    # ax.scatter(x[-1], y[-1], c='k', s=50, marker='^', label='Orbit Direction', zorder=3)
     ax.set_xlabel(r'$\alpha$ [deg]')
     ax.set_ylabel(r'$\delta$ [deg]')
     # ax.legend(handles = legend_handles, loc='upper right', fontsize=10)
