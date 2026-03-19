@@ -7,6 +7,7 @@ pd.options.mode.chained_assignment = None
 import healpy as hp
 import scipy as sp
 import scipy.stats as stats
+from scipy.special import log_ndtr
 from astropy.io import fits
 from astropy import table
 import astropy.coordinates as coord
@@ -17,6 +18,13 @@ import importlib
 
 import emcee
 import corner
+
+
+def stable_log_cdf_diff(a, b, loc, scale):
+    """Numerically stable computation of log(Phi(b) - Phi(a)) for a normal distribution."""
+    log_upper = log_ndtr((b - loc) / scale)
+    log_lower = log_ndtr((a - loc) / scale)
+    return log_upper + np.log1p(-np.exp(log_lower - log_upper))
 
 from collections import OrderedDict
 import time
@@ -751,13 +759,13 @@ def lnprob(theta, prior, vgsr, vgsr_err, feh, feh_err, pmra, pmra_err, pmdec, pm
     elif trunc_fit:
         # Compute standardized bounds for truncnorm
         min_trunc_vgsr, max_trunc_vgsr = np.min(vgsr), np.max(vgsr)
-        lvgsr_cdf_dif = np.log(stats.norm.cdf(max_trunc_vgsr, loc=bv, scale=scale_bg_vgsr) - stats.norm.cdf(min_trunc_vgsr, loc=bv, scale=scale_bg_vgsr))
+        lvgsr_cdf_dif = stable_log_cdf_diff(min_trunc_vgsr, max_trunc_vgsr, loc=bv, scale=scale_bg_vgsr)
         lstream_v = stats.norm.logpdf(vgsr, loc=quad_f(phi1,v1,v2,v3), scale=scale_stream_vgsr)
         lbg_v = stats.norm.logpdf(vgsr, loc=bv, scale=scale_bg_vgsr) - lvgsr_cdf_dif
-                
+
         if feh_fit:
             min_trunc_feh, max_trunc_feh = np.min(feh), np.max(feh)
-            lfeh_cdf_dif = np.log(stats.norm.cdf(max_trunc_feh, loc=bfeh, scale=scale_bg_feh) - stats.norm.cdf(min_trunc_feh, loc=bfeh, scale=scale_bg_feh))
+            lfeh_cdf_dif = stable_log_cdf_diff(min_trunc_feh, max_trunc_feh, loc=bfeh, scale=scale_bg_feh)
             lstream_feh = stats.norm.logpdf(feh, loc=feh1, scale=scale_stream_feh)
             lbg_feh = stats.norm.logpdf(feh, loc=bfeh, scale=scale_bg_feh) - lfeh_cdf_dif
     
@@ -1332,14 +1340,14 @@ def spline_lnprob(theta, prior, spline_x_points, sf_spline_x_points, lsigmav_spl
     elif trunc_fit:
         # Compute standardized bounds for truncnorm
         min_trunc_vgsr, max_trunc_vgsr = np.min(vgsr), np.max(vgsr)
-        lvgsr_cdf_dif = np.log(stats.norm.cdf(max_trunc_vgsr, loc=bv, scale=scale_bg_vgsr) - stats.norm.cdf(min_trunc_vgsr, loc=bv, scale=scale_bg_vgsr))
-        
+        lvgsr_cdf_dif = stable_log_cdf_diff(min_trunc_vgsr, max_trunc_vgsr, loc=bv, scale=scale_bg_vgsr)
+
         lstream_v = stats.norm.logpdf(vgsr, loc=apply_spline(phi1, spline_x_points, vgsr_spline_points, k=k), scale=scale_stream_vgsr)
         lbg_v = stats.norm.logpdf(vgsr, loc=bv, scale=scale_bg_vgsr) - lvgsr_cdf_dif
-                
+
         if feh_fit:
             min_trunc_feh, max_trunc_feh = np.min(feh), np.max(feh)
-            lfeh_cdf_dif = np.log(stats.norm.cdf(max_trunc_feh, loc=bfeh, scale=scale_bg_feh) - stats.norm.cdf(min_trunc_feh, loc=bfeh, scale=scale_bg_feh))
+            lfeh_cdf_dif = stable_log_cdf_diff(min_trunc_feh, max_trunc_feh, loc=bfeh, scale=scale_bg_feh)
             lstream_feh = stats.norm.logpdf(feh, loc=feh1, scale=scale_stream_feh)
             lbg_feh = stats.norm.logpdf(feh, loc=bfeh, scale=scale_bg_feh) - lfeh_cdf_dif
     
@@ -1721,35 +1729,23 @@ def call_likelihood(theta, prior, spline_x_points, vgsr, vgsr_err, feh, feh_err,
     scale_stream_feh = np.sqrt(feh_err**2 + (10**lsigfeh)**2)
     scale_bg_feh = np.sqrt(feh_err**2 + (10**lsigbfeh)**2)
 
-    lvgsr_cdf_dif = np.log(
-        stats.norm.cdf(vgsr_trunc[1], loc=bv, scale=scale_bg_vgsr)
-        - stats.norm.cdf(vgsr_trunc[0], loc=bv, scale=scale_bg_vgsr)
-    )
+    lvgsr_cdf_dif = stable_log_cdf_diff(vgsr_trunc[0], vgsr_trunc[1], loc=bv, scale=scale_bg_vgsr)
     lstream_v = stats.norm.logpdf(
         vgsr, loc=apply_spline(phi1, spline_x_points, vgsr_spline_points, k=k), scale=scale_stream_vgsr
     )
     lbg_v = stats.norm.logpdf(vgsr, loc=bv, scale=scale_bg_vgsr) - lvgsr_cdf_dif
 
-    lfeh_cdf_dif = np.log(
-        stats.norm.cdf(feh_trunc[1], loc=bfeh, scale=scale_bg_feh)
-        - stats.norm.cdf(feh_trunc[0], loc=bfeh, scale=scale_bg_feh)
-    )
+    lfeh_cdf_dif = stable_log_cdf_diff(feh_trunc[0], feh_trunc[1], loc=bfeh, scale=scale_bg_feh)
     lstream_feh = stats.norm.logpdf(feh, loc=feh1, scale=scale_stream_feh)
     lbg_feh = stats.norm.logpdf(feh, loc=bfeh, scale=scale_bg_feh) - lfeh_cdf_dif
 
-    lpmra_cdf_dif = np.log(
-        stats.norm.cdf(pmra_trunc[1], loc=bpmra, scale=scale_bg_pmra)
-        - stats.norm.cdf(pmra_trunc[0], loc=bpmra, scale=scale_bg_pmra)
-    )
+    lpmra_cdf_dif = stable_log_cdf_diff(pmra_trunc[0], pmra_trunc[1], loc=bpmra, scale=scale_bg_pmra)
     lstream_pmra = stats.norm.logpdf(
         pmra, loc=apply_spline(phi1, spline_x_points, pmra_spline_points, k=k), scale=scale_stream_pmra
     )
     lbg_pmra = stats.norm.logpdf(pmra, loc=bpmra, scale=scale_bg_pmra) - lpmra_cdf_dif
 
-    lpmdec_cdf_dif = np.log(
-        stats.norm.cdf(pmdec_trunc[1], loc=bpmdec, scale=scale_bg_pmdec)
-        - stats.norm.cdf(pmdec_trunc[0], loc=bpmdec, scale=scale_bg_pmdec)
-    )
+    lpmdec_cdf_dif = stable_log_cdf_diff(pmdec_trunc[0], pmdec_trunc[1], loc=bpmdec, scale=scale_bg_pmdec)
     lstream_pmdec = stats.norm.logpdf(
         pmdec, loc=apply_spline(phi1, spline_x_points, pmdec_spline_points, k=k), scale=scale_stream_pmdec
     )

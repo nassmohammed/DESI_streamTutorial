@@ -303,6 +303,8 @@ def drag_spline(
     tol=7,
     sf_in_desi=None,
     sf_not_desi=None,
+    showGalstream=False,
+    galstream_obj=None,
     n_ctrl=None,
     phi1_fixed=None,
 ):
@@ -310,6 +312,10 @@ def drag_spline(
 
     Returns a dict with fig/axes plus a ``save()`` callable that writes
     control points to ``ctrl_path`` and returns them as a dict.
+
+    If ``showGalstream=True``, overlay the galstreams track (VGSR/PMRA/PMDEC)
+    on each panel. ``galstream_obj`` is optional and auto-detected from common
+    containers (e.g., ``obj.data.SoI_galstream``) when possible.
     """
     phi1 = np.asarray(phi1)
     phi1_fixed = np.asarray(phi1_fixed, dtype=float) if phi1_fixed is not None else None
@@ -388,6 +394,48 @@ def drag_spline(
         ax.scatter(x_overlay, y_overlay, **style)
         return len(x_overlay)
 
+    def _resolve_galstream_obj():
+        candidates = [galstream_obj, sf_in_desi, sf_not_desi]
+        for obj in candidates:
+            if obj is None:
+                continue
+            if hasattr(obj, "track") and hasattr(obj, "gal_phi1"):
+                return obj
+            for parent in (obj, getattr(obj, "data", None), getattr(obj, "stream", None)):
+                if parent is None:
+                    continue
+                gs = getattr(parent, "SoI_galstream", None)
+                if gs is not None and hasattr(gs, "track") and hasattr(gs, "gal_phi1"):
+                    return gs
+        return None
+
+    gal_obj = _resolve_galstream_obj() if showGalstream else None
+
+    def _galstream_y(track, key):
+        if key == "vgsr":
+            return stream_funcs.vhel_to_vgsr(
+                np.asarray(track.ra.value, dtype=float) * u.deg,
+                np.asarray(track.dec.value, dtype=float) * u.deg,
+                np.asarray(track.radial_velocity.value, dtype=float) * (u.km / u.s),
+            ).value
+        if key == "pmra":
+            return np.asarray(track.pm_ra_cosdec.value, dtype=float)
+        return np.asarray(track.pm_dec.value, dtype=float)
+
+    def _maybe_plot_galstream(ax, key):
+        if gal_obj is None:
+            return 0
+        try:
+            xg = np.asarray(gal_obj.gal_phi1, dtype=float)
+            yg = _galstream_y(gal_obj.track, key)
+            good = np.isfinite(xg) & np.isfinite(yg)
+            if np.count_nonzero(good) < 2:
+                return 0
+            ax.plot(xg[good], yg[good], color="tab:orange", lw=2.0, alpha=0.9, label="Galstream")
+            return int(np.count_nonzero(good))
+        except Exception:
+            return 0
+
     def redraw(key, xc, yc):
         order = np.argsort(xc)
         xc_s = np.asarray(xc)[order]
@@ -402,12 +450,14 @@ def drag_spline(
 
     sf_in_count = 0
     sf_not_count = 0
+    gal_count = 0
 
     for ax, key in zip(axes, ["vgsr", "pmra", "pmdec"]):
         ydata, ylabel = datasets[key]
         ax.scatter(phi1, ydata, s=6, alpha=0.25, label="data")
         sf_in_count += _maybe_plot_overlay(ax, key, "sf_in", sf_in_desi)
         sf_not_count += _maybe_plot_overlay(ax, key, "sf_not", sf_not_desi)
+        gal_count += _maybe_plot_galstream(ax, key)
         cx, cy = ctrl_init[key]
         line, = ax.plot([], [], "k-", lw=2.5, label="spline")
         lines[key] = line
@@ -426,6 +476,8 @@ def drag_spline(
     plt.tight_layout()
     if sf_in_count or sf_not_count:
         print(f"Overlayed SF stars: in DESI = {sf_in_count}, not in DESI = {sf_not_count}")
+    if gal_count:
+        print(f"Overlayed galstream track points: {gal_count}")
 
     # Show the interactive figure - plt.show(block=False) works better in VS Code
     plt.show(block=False)
@@ -507,7 +559,7 @@ class Data:
                 ).value
             )
         else:
-            print('No STREAMFINDER path given.')        
+            print('No STREAMFINDER path given.')
 
     def select(self, mask_or_func):
         """
@@ -818,7 +870,7 @@ class Selection:
         return combined_mask
 
 
-def register_kinematic_masks(selection, cfg, streamfinder_df):
+def register_kinematic_masks(selection, cfg, streamfinder_df, galstream_obj=None):
     """
     Register standard kinematic masks on a Selection.
 
@@ -851,6 +903,7 @@ def register_kinematic_masks(selection, cfg, streamfinder_df):
     spline_cfg = cfg.get('spline', {})
     sf_cfg = cfg.get('sf', {})
     wide_cfg = cfg.get('wide', {})
+    galstream_cfg = cfg.get('galstream', {})
 
     def _add_box(name, col, bounds):
         lo, hi = bounds
@@ -866,6 +919,36 @@ def register_kinematic_masks(selection, cfg, streamfinder_df):
                 (df[col] <= spline(df['phi1']) + wiggle)
         )
 
+    def _galstream_spline(name, col, wiggle):
+        if col == 'VGSR' and galstream_obj is not None:
+            ra_g = galstream_obj.track.ra.value
+            dec_g = galstream_obj.track.dec.value
+            vhel_g = galstream_obj.track.radial_velocity.value
+            if ra_g is not None and dec_g is not None:
+                vgsr_g = stream_funcs.vhel_to_vgsr(
+                    np.asarray(ra_g) * u.deg,
+                    np.asarray(dec_g) * u.deg,
+                    np.asarray(vhel_g) * (u.km / u.s)
+                ).value
+            
+            spline = sp.interpolate.InterpolatedUnivariateSpline(galstream_obj.gal_phi1, vgsr_g, k=2)
+        elif col == 'PMRA' and galstream_obj is not None:
+            pmra_g = galstream_obj.track.pm_ra_cosdec.value
+            spline = sp.interpolate.InterpolatedUnivariateSpline(galstream_obj.gal_phi1, pmra_g, k=2)
+        elif col == 'PMDEC' and galstream_obj is not None:
+            pmdec_g = galstream_obj.track.pm_dec.value
+            spline = sp.interpolate.InterpolatedUnivariateSpline(galstream_obj.gal_phi1, pmdec_g, k=2)
+        else:
+            print('col not VGSR, PMRA, or PMDEC. Otherwise, galstreams object not passed')
+        
+        selection.add_mask(
+            name,
+            lambda df, spline=spline, wiggle=wiggle, col=col:
+                (df[col] >= spline(df['phi1']) - wiggle) &
+                (df[col] <= spline(df['phi1']) + wiggle)
+        )
+
+
     def _streamfinder_endpoints(field):
         phi_lo = streamfinder_df['phi1'].min()
         phi_hi = streamfinder_df['phi1'].max()
@@ -879,6 +962,23 @@ def register_kinematic_masks(selection, cfg, streamfinder_df):
         and not streamfinder_df.empty
         and all(col in streamfinder_df.columns for col in ('phi1', 'pmRA', 'pmDE'))
     )
+
+    # Galstream masks
+    # vgsr
+    if 'vgsr' in galstream_cfg:
+        vg = galstream_cfg['vgsr']
+        wiggle = vg.get('wiggle', 10)
+        _galstream_spline('VGSR_gal', 'VGSR', wiggle)
+    # pmra
+    if 'pmra' in galstream_cfg:
+        pmr = galstream_cfg['pmra']
+        wiggle = pmr.get('wiggle', 0.5)
+        _galstream_spline('PMRA_gal', 'PMRA', wiggle)
+    # pmdec
+    if 'pmdec' in galstream_cfg:
+        pmd = galstream_cfg['pmdec']
+        wiggle = pmd.get('wiggle', 0.5)
+        _galstream_spline('PMDEC_gal', 'PMDEC', wiggle)
 
     # --- VGSR spline mask ---
     if 'vgsr' in spline_cfg:
@@ -1120,11 +1220,10 @@ class stream:
         
         return trimmed_stream
 
-    def isochrone(self, metallicity, age):
+    def isochrone(self, metallicity, age, dotter_directory='./data/dotter/'):
         """
         Placeholder for isochrone fitting logic.
         """
-        dotter_directory='./data/dotter/'
         mass_fraction = 0.0181 * 10 ** metallicity
         print(f'Mass Fraction (Z): {mass_fraction}')
 
@@ -1164,7 +1263,7 @@ class stream:
                 distance_sf = self.min_dist*1000
                 distance_cut_sf = self.min_dist*1000
 
-        else:
+        elif hasattr(self, 'dist_override') == False or self.dist_override == False:
             if np.round(self.min_dist,4) != 1:
                 # interpolate distance
                 interpolate_distances = interp1d(self.data.SoI_galstream.gal_phi1, self.data.SoI_galstream.track.distance.value*1000, kind='linear', fill_value='extrapolate')
@@ -1422,11 +1521,15 @@ class StreamPlotter:
         import astropy.coordinates as ac
         mwsts = self.stream.mwsts
         tnames = mwsts.get_track_names_in_sky_window([np.nanmin(self.data.desi_data['TARGET_RA']), np.nanmax(self.data.desi_data['TARGET_RA'])]*u.deg, [np.nanmin(self.data.desi_data['TARGET_DEC']), np.nanmax(self.data.desi_data['TARGET_DEC'])]*u.deg, frame=ac.ICRS, 
-                                           On_only=False, wrap_angle=180.*u.deg)
+                                           On_only=True)#, wrap_angle=180.*u.deg)
         fig, ax = plt.subplots(1,1, figsize=(7,3))
         ax.scatter(self.data.desi_data['TARGET_RA'], self.data.desi_data['TARGET_DEC'], color='k', s=1, label='DESI data', alpha=0.05)
-        for st in tnames:
-            ax.plot(mwsts[st].track.ra, mwsts[st].track.dec, '-o', ms=2., label=st)
+        linestyles = ['-', '--', ':', '-.']
+
+        for i, st in enumerate(tnames):
+            ls = linestyles[i % len(linestyles)]
+            ax.plot(mwsts[st].track.ra,mwsts[st].track.dec,linestyle=ls,label=st)
+
         ax.set_xlim(np.nanmin(self.data.desi_data['TARGET_RA'])-2, np.nanmax(self.data.desi_data['TARGET_RA'])+2)
         ax.set_ylim(np.nanmin(self.data.desi_data['TARGET_DEC'])-2, np.nanmax(self.data.desi_data['TARGET_DEC'])+2)
         ax.set_xlabel('RA [deg]')
@@ -3690,8 +3793,8 @@ class StreamPlotter:
             
         # Plot truncated Gaussian components
         if self.mcmeta.truncation_params['feh_min'] != -np.inf or self.mcmeta.truncation_params['feh_max'] != np.inf:
-            feh_range = np.linspace(self.mcmeta.truncation_params['feh_min'] - 0.5, 
-                                self.mcmeta.truncation_params['feh_max'] + 0.5, 200)
+            feh_range = np.linspace(self.mcmeta.truncation_params['feh_min'], 
+                                self.mcmeta.truncation_params['feh_max'], 200)
         else:
             feh_range = np.linspace(np.min(desi_data['FEH']) - 0.5, 
                                 np.max(desi_data['FEH']) + 0.5, 200)
@@ -4192,7 +4295,7 @@ class MCMeta:
         )
         # Run optimization
         print("Running optimization...")
-        self.sp_result = sp.optimize.minimize(self.optfunc, self.flat_p0_guess, method=method, options={'maxiter': 20000}, bounds=self.prior_arr)
+        self.sp_result = sp.optimize.minimize(self.optfunc, self.flat_p0_guess, method=method, options={'maxiter': 1000})
         print(self.sp_result.message)
 
         self.reshaped_result = stream_funcs.reshape_arr(self.sp_result.x, self.array_lengths)
@@ -4325,7 +4428,7 @@ class MCMC:
         self.stream = self.meta.stream
         self.output_dir = output_dir
         self.backend = emcee.backends.HDFBackend(self.output_dir+'/'+self.stream.streamName+str(self.meta.no_of_spline_points)+'.h5')
-        self.backend.reset(self.meta.nwalkers,len(self.meta.p0))
+        self.backend.reset(self.meta.nwalkers,len(self.meta.flat_p0_guess))
         # Book-keeping for runtime metrics
         self.mcmc_start_time = None
         self.mcmc_end_time = None
