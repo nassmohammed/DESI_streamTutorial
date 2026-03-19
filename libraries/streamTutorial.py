@@ -447,73 +447,53 @@ def drag_spline(
     }
 
 class Data:
-    def __init__(self, desi_path, sf_path='/raid/catalogs/streamfinder_gaiadr3.fits', cleaned_data=False, dist_path='', **kwargs):
+    def __init__(self, desi_path, sf_path='/raid/catalogs/streamfinder_gaiadr3.fits'):
         self.desi_path = desi_path
         self.sf_path = sf_path
-        self.cleaned_data = cleaned_data
-        self.kwargs = dict(kwargs)
-        for k, v in kwargs.items():
-            if not hasattr(self, k):
-                setattr(self, k, v)
-        if not cleaned_data:
 
-            self.decals_data = stream_funcs.load_fits_columns(self.decals_path, ['EBV', 'FLUX_G', 'FLUX_R', 'FLUX_Z'])
-            # These are the columns from the DESI data that we want to import
-            desired_columns = [
-            'VRAD', 'VRAD_ERR', 'RVS_WARN', 'TEFF', 'LOGG', ## TEFF and LOGG needed for FeH correction
-            'RR_SPECTYPE', 
-            'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR',
-            'TARGETID', 'PRIMARY',
-            'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
-            ]
-            # if 'FE_H' in self.desi_data.columns:
-            #     self.desi_data['FEH'] = self.desi_data['FE_H']
-            #     self.desi_data.drop(columns=['FE_H'], inplace=True)
-            #     if 'FE_H_ERR' in self.desi_data.columns:
-            #         self.desi_data['FEH_ERR'] = self.desi_data['FE_H_ERR']
-            #         self.desi_data.drop(columns=['FE_H_ERR'], inplace=True)
-            desi_hdu_indices = [1,3,4]
-            self.desi_vrad_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
-            self.desi_vrad_data.label='DESI'
-            self.desi_data = table.hstack([self.desi_vrad_data, self.decals_data]) 
-            # Drop the rows with NaN values in all columns
-            print(f"Length of DESI Data before Cuts: {len(self.desi_data)}")
-            self.desi_data = stream_funcs.dropna_Table(self.desi_data, columns = desired_columns)
-            self.desi_data = self.desi_data[(self.desi_data['RVS_WARN'] == 0) & (self.desi_data['RR_SPECTYPE'] == 'STAR') & (self.desi_data['PRIMARY']) &\
-            (self.desi_data['VRAD_ERR'] < 10) & (self.desi_data['FEH_ERR'] < 0.5)] 
-            self.desi_data.remove_columns(['RVS_WARN', 'RR_SPECTYPE'])
-            self.desi_data = self.desi_data.to_pandas()
-            # remove stars with FLUX_G and FLUX_R as NaN
-            self.desi_data = self.desi_data[~self.desi_data['FLUX_G'].isna() | ~self.desi_data['FLUX_R'].isna() |  ~self.desi_data['EBV'].isna()]
-            
-            print(f"Length after NaN cut: {len(self.desi_data)}")
+        # These are the columns from the DESI data that we want to import
+        desired_columns = [
+        'VRAD', 'VRAD_ERR', 'RVS_WARN', 'TEFF', 'LOGG', ## TEFF and LOGG needed for FeH correction
+        'RR_SPECTYPE', 
+        'TARGET_RA', 'TARGET_DEC', 'FEH', 'FEH_ERR', 'EBV', 'FLUX_G', 'FLUX_R', 'FLUX_Z',
+        'TARGETID', 'PRIMARY', 'PHOT_BP_MEAN_FLUX', 'PHOT_RP_MEAN_FLUX',
+        'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
+        ]
+        desi_hdu_indices = [1,3,4,5]
+        self.desi_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
+        self.desi_data.label='DESI'
+        # Drop the rows with NaN values in all columns
+        print(f"Length of DESI Data before Cuts: {len(self.desi_data)}")
+        self.desi_data = stream_funcs.dropna_Table(self.desi_data, columns = desired_columns)
+        self.desi_data = self.desi_data[(self.desi_data['RVS_WARN'] == 0) & (self.desi_data['RR_SPECTYPE'] == 'STAR') & (self.desi_data['PRIMARY']) &\
+        (self.desi_data['VRAD_ERR'] < 10) & (self.desi_data['FEH_ERR'] < 0.5)] 
+        self.desi_data.remove_columns(['RVS_WARN', 'RR_SPECTYPE'])
+        self.desi_data = self.desi_data.to_pandas()
+        # remove stars with FLUX_G and FLUX_R as NaN
+        self.desi_data = self.desi_data[~self.desi_data['FLUX_G'].isna() | ~self.desi_data['FLUX_R'].isna() |  ~self.desi_data['EBV'].isna()]
         
+        print(f"Length after NaN cut: {len(self.desi_data)}")
 
-            # Applying additional errors in quadrature
-            self.desi_data['VRAD_ERR'] = np.sqrt(self.desi_data['VRAD_ERR']**2 + 0.9**2) ### Turn into its own column
-            self.desi_data['PMRA_ERROR'] = np.sqrt(self.desi_data['PMRA_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
-            self.desi_data['PMDEC_ERROR'] = np.sqrt(self.desi_data['PMDEC_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
-            self.desi_data['FEH_ERR'] = np.sqrt(self.desi_data['FEH_ERR']**2 + 0.01**2) ### Turn into its own column
+        # Applying additional errors in quadrature
+        self.desi_data['VRAD_ERR'] = np.sqrt(self.desi_data['VRAD_ERR']**2 + 0.9**2) ### Turn into its own column
+        self.desi_data['PMRA_ERROR'] = np.sqrt(self.desi_data['PMRA_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
+        self.desi_data['PMDEC_ERROR'] = np.sqrt(self.desi_data['PMDEC_ERROR']**2 + (np.sqrt(550)*0.001)**2) ### Turn into its own column
+        self.desi_data['FEH_ERR'] = np.sqrt(self.desi_data['FEH_ERR']**2 + 0.01**2) ### Turn into its own column
 
 
-            # # Apply Metallicity correction to the DR1 Data (See Section 4.2 https://arxiv.org/pdf/2505.14787)
-            # print("Adding empirical FEH calibration (can find uncalibrated data in column['FEH_uncalib])")
-            # self.desi_data['FEH_uncalib'] = self.desi_data['FEH']
-            # self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
-            
-            # Switch to VGSR instead of VRAD
-            self.desi_data['VGSR'] = np.array(
-                stream_funcs.vhel_to_vgsr(
-                    np.array(self.desi_data['TARGET_RA']) * u.deg,
-                    np.array(self.desi_data['TARGET_DEC']) * u.deg,
-                    np.array(self.desi_data['VRAD']) * (u.km / u.s),
-                ).value
-            )
-        else:
-            desi_data_tbl = table.Table.read(self.desi_path, format='fits')
-            # Convert Astropy Table to Pandas DataFrame properly
-            self.desi_data = desi_data_tbl.to_pandas()
-
+        # # Apply Metallicity correction to the DR1 Data (See Section 4.2 https://arxiv.org/pdf/2505.14787)
+        # print("Adding empirical FEH calibration (can find uncalibrated data in column['FEH_uncalib])")
+        # self.desi_data['FEH_uncalib'] = self.desi_data['FEH']
+        # self.desi_data['FEH'] = feh_correct.calibrate(self.desi_data['FEH'], self.desi_data['TEFF'], self.desi_data['LOGG'])
+        
+        # Switch to VGSR instead of VRAD
+        self.desi_data['VGSR'] = np.array(
+            stream_funcs.vhel_to_vgsr(
+                np.array(self.desi_data['TARGET_RA']) * u.deg,
+                np.array(self.desi_data['TARGET_DEC']) * u.deg,
+                np.array(self.desi_data['VRAD']) * (u.km / u.s),
+            ).value
+        )
 
         # Lets load the STREAMFINDER data for Gaia DR3
         if sf_path:
@@ -527,27 +507,7 @@ class Data:
                 ).value
             )
         else:
-            print('No STREAMFINDER path given.')
-
-        if dist_path:
-            distance_data = stream_funcs.load_fits_columns(dist_path, ['TARGETID', 'dist_mod', 'dist_mod_err'])
-            distance_data = pl.from_pandas(distance_data.to_pandas())
-            desi_data_pl = pl.from_pandas(self.desi_data)
-
-            # Ensure same dtype
-            distance_data = distance_data.with_columns(
-                distance_data['TARGETID'].cast(desi_data_pl['TARGETID'].dtype)
-            )
-
-            # Fast hash join
-            desi_data_pl = desi_data_pl.join(distance_data, on='TARGETID', how='left')
-
-            # Back to pandas if needed downstream
-            self.desi_data = desi_data_pl.to_pandas()
-
-            print("RVS distances added")
-
-        
+            print('No STREAMFINDER path given.')        
 
     def select(self, mask_or_func):
         """
@@ -972,7 +932,7 @@ def register_kinematic_masks(selection, cfg, streamfinder_df):
 class stream:
     def __init__(self, data_object, streamName='Sylgr-I21', frame=None, add_bhb=True, **kwargs):
         self.streamName = streamName
-        self.local = data_object.cleaned_data
+        self.local = data_object.desi_data
         self.frame = frame
         self.add_bhb = add_bhb
 
