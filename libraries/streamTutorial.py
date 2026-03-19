@@ -466,12 +466,12 @@ class Data:
             'TARGETID', 'PRIMARY',
             'SOURCE_ID', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 'PARALLAX', 'PARALLAX_ERROR', 'PMRA_PMDEC_CORR'
             ]
-            if 'FE_H' in self.desi_data.columns:
-                self.desi_data['FEH'] = self.desi_data['FE_H']
-                self.desi_data.drop(columns=['FE_H'], inplace=True)
-                if 'FE_H_ERR' in self.desi_data.columns:
-                    self.desi_data['FEH_ERR'] = self.desi_data['FE_H_ERR']
-                    self.desi_data.drop(columns=['FE_H_ERR'], inplace=True)
+            # if 'FE_H' in self.desi_data.columns:
+            #     self.desi_data['FEH'] = self.desi_data['FE_H']
+            #     self.desi_data.drop(columns=['FE_H'], inplace=True)
+            #     if 'FE_H_ERR' in self.desi_data.columns:
+            #         self.desi_data['FEH_ERR'] = self.desi_data['FE_H_ERR']
+            #         self.desi_data.drop(columns=['FE_H_ERR'], inplace=True)
             desi_hdu_indices = [1,3,4]
             self.desi_vrad_data = stream_funcs.load_fits_columns(desi_path, desired_columns, desi_hdu_indices)
             self.desi_vrad_data.label='DESI'
@@ -3462,7 +3462,7 @@ class StreamPlotter:
             
         return fig, ax
     
-    def show_gaussians(self, show_model=True, show_total=True, param_source=None):
+    def show_gaussians(self, show_model=True, show_total=True, param_source=None, background=True, numBins=60):
         from scipy.stats import truncnorm, norm
         colors = list(plt.rcParams["axes.prop_cycle"].by_key()["color"])
 
@@ -3484,10 +3484,11 @@ class StreamPlotter:
         
         stream_vgsr_mean = np.mean(param_source['vgsr_spline_points'])
         lsigv_init = np.atleast_1d(param_source['lsigvgsr'])
+        lsigbv_init = np.atleast_1d(param_source['lsigbv'])
         stream_vgsr_std = float(np.mean(10**lsigv_init))
 
-        vgsr_a = (self.mcmeta.truncation_params['vgsr_min'] - stream_vgsr_mean) / stream_vgsr_std
-        vgsr_b = (self.mcmeta.truncation_params['vgsr_max'] - stream_vgsr_mean) / stream_vgsr_std
+        vgsr_a = (self.mcmeta.truncation_params['vgsr_min'] - stream_vgsr_mean) / lsigbv_init
+        vgsr_b = (self.mcmeta.truncation_params['vgsr_max'] - stream_vgsr_mean) / lsigbv_init
         stream_vgsr_pdf = norm.pdf(vgsr_range, loc=stream_vgsr_mean, scale=stream_vgsr_std)
         b_vgsr_pdf =  truncnorm.pdf(vgsr_range, vgsr_a, vgsr_b, loc=param_source['bv'], scale=10**param_source['lsigbv'])
 
@@ -3499,13 +3500,23 @@ class StreamPlotter:
         feh_a = (self.mcmeta.truncation_params['feh_min'] - param_source['bfeh']) / (10**param_source['lsigbfeh'])
         feh_b = (self.mcmeta.truncation_params['feh_max'] - param_source['bfeh']) / (10**param_source['lsigbfeh'])
         b_feh_pdf = truncnorm.pdf(feh_range, feh_a, feh_b, loc=param_source['bfeh'], scale=10**param_source['lsigbfeh'])
+        b_feh_pdf_full = norm.pdf(feh_range, loc=param_source['bfeh'], scale=10**param_source['lsigbfeh'])
 
 
         # ----- # pmra
+        if hasattr(self.mcmeta, 'lsigpm_') and self.mcmeta.lsigpm_ is not None:
+            print(self.mcmeta.lsigpm_)
+            lsigpmra = self.mcmeta.lsigpm_
+            lsigpmdec = self.mcmeta.lsigpm_
+            print('Using fixed lsigpm_ for both PMRA and PMDEC:', self.mcmeta.lsigpm_)
+        else:
+            lsigpmra = param_source['lsigpmra']
+            lsigpmdec = param_source['lsigpmdec']
+            
 
         pmra_range = np.linspace(self.mcmeta.truncation_params['pmra_min'], 
                                     self.mcmeta.truncation_params['pmra_max'], 2000)
-        stream_pmra_pdf = norm.pdf(pmra_range, loc=param_source['pmra_spline_points'].mean(), scale=10**param_source['lsigpmra'])
+        stream_pmra_pdf = norm.pdf(pmra_range, loc=param_source['pmra_spline_points'].mean(), scale=10**lsigpmra)
         pmra_a = (self.mcmeta.truncation_params['pmra_min'] - param_source['bpmra']) / (10**param_source['lsigbpmra'])
         pmra_b = (self.mcmeta.truncation_params['pmra_max'] - param_source['bpmra']) / (10**param_source['lsigbpmra'])
         b_pmra_pdf = truncnorm.pdf(pmra_range, pmra_a, pmra_b, loc=param_source['bpmra'], scale=10**param_source['lsigbpmra'])
@@ -3515,7 +3526,7 @@ class StreamPlotter:
 
         pmdec_range = np.linspace(self.mcmeta.truncation_params['pmdec_min'], 
                                     self.mcmeta.truncation_params['pmdec_max'], 2000)
-        stream_pmdec_pdf = norm.pdf(pmdec_range, loc=param_source['pmdec_spline_points'].mean(), scale=10**param_source['lsigpmdec'])
+        stream_pmdec_pdf = norm.pdf(pmdec_range, loc=param_source['pmdec_spline_points'].mean(), scale=10**lsigpmdec)
         pmdec_a = (self.mcmeta.truncation_params['pmdec_min'] - param_source['bpmdec']) / (10**param_source['lsigbpmdec'])
         pmdec_b = (self.mcmeta.truncation_params['pmdec_max'] - param_source['bpmdec']) / (10**param_source['lsigbpmdec'])
         b_pmdec_pdf = truncnorm.pdf(pmdec_range, pmdec_a, pmdec_b, loc=param_source['bpmdec'], scale=10**param_source['lsigbpmdec'])
@@ -3524,21 +3535,105 @@ class StreamPlotter:
 
         fig, axes = plt.subplots(2, 2, figsize=(9,9))
 
-        axes[0, 0].plot(vgsr_range, 10*stream_weight* stream_vgsr_pdf/stream_vgsr_pdf.max(), color=colors[0], ls='dashed', lw=2)
+        for ax in axes.flatten():
+            ax.set_ylim(0, 1.2)
 
+        def _plot_normalized_data_hist(ax, values, x_range, bins=numBins, color='0.75', alpha=0.2):
+            vals = np.asarray(values, dtype=float)
+            vals = vals[np.isfinite(vals)]
+            if vals.size == 0:
+                return
+
+            xmin, xmax = float(x_range[0]), float(x_range[-1])
+            if not np.isfinite(xmin) or not np.isfinite(xmax) or xmin >= xmax:
+                xmin, xmax = float(np.nanmin(vals)), float(np.nanmax(vals))
+                if not np.isfinite(xmin) or not np.isfinite(xmax) or xmin >= xmax:
+                    return
+
+            hist, edges = np.histogram(vals, bins=bins, range=(xmin, xmax), density=True)
+            hmax = np.max(hist)
+            if not np.isfinite(hmax) or hmax <= 0:
+                return
+            hist = hist / hmax
+            centers = 0.5 * (edges[1:] + edges[:-1])
+            widths = np.diff(edges)
+            ax.bar(centers, hist, width=widths, color=color, alpha=alpha, edgecolor='none', zorder=0, align='center')
+        if background:
+            _plot_normalized_data_hist(axes[0, 0], self.data.desi_data['VGSR'].values, vgsr_range)
+            _plot_normalized_data_hist(axes[0, 1], self.data.desi_data['FEH'].values, feh_range)
+            _plot_normalized_data_hist(axes[1, 0], self.data.desi_data['PMRA'].values, pmra_range)
+            _plot_normalized_data_hist(axes[1, 1], self.data.desi_data['PMDEC'].values, pmdec_range)
+
+        total_pdf = (stream_weight * stream_vgsr_pdf/stream_vgsr_pdf.max()) + (1-stream_weight) * b_vgsr_pdf/b_vgsr_pdf.max()
+
+        axes[0, 0].plot(vgsr_range, stream_weight * stream_vgsr_pdf/stream_vgsr_pdf.max(), color=colors[0], ls='dashed', lw=2)
         axes[0, 0].plot(vgsr_range, b_vgsr_pdf/ b_vgsr_pdf.max(), color=colors[1], ls='dashed', lw=2)
-        a =  b_vgsr_pdf[-1]/ b_vgsr_pdf.max()
+        a_right = b_vgsr_pdf[-1] / b_vgsr_pdf.max()
+        a_left = b_vgsr_pdf[0] / b_vgsr_pdf.max()
         y0, y1 = axes[0,0].get_ylim()
-        axes[0,0].axvline(vgsr_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        axes[0,0].axvline(vgsr_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a_right - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        axes[0,0].axvline(vgsr_range[0], ymin=(0 - y0)/(y1 - y0), ymax=(a_left - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        if show_total:
+            axes[0, 0].plot(vgsr_range, total_pdf/total_pdf.max(), color='k', ls='solid', lw=3, label='Total Mixture', alpha=0.3)
+            a_total_right = total_pdf[-1] / total_pdf.max()
+            a_total_left = total_pdf[0] / total_pdf.max()
+            axes[0,0].axvline(vgsr_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a_total_right - y0)/(y1 - y0), color='k', ls='solid', lw=3, alpha=0.3)
+            axes[0,0].axvline(vgsr_range[0], ymin=(0 - y0)/(y1 - y0), ymax=(a_total_left - y0)/(y1 - y0), color='k', ls='solid', lw=3, alpha=0.3)
 
-        axes[0, 0].set_xlabel('VGSR (km/s)')
 
-        axes[0, 1].plot(feh_range, 10*stream_weight* stream_feh_pdf/stream_feh_pdf.max(), color=colors[0], ls='dashed', lw=2)
-        axes[0, 1].plot(feh_range, b_feh_pdf/ b_feh_pdf.max(), color=colors[1], ls='dashed', lw=2)
-        a =  b_feh_pdf[-1]/ b_feh_pdf.max()
+        axes[0, 0].set_xlabel(r'$v_{gsr}$ (km/s)')
+
+        total_pdf_feh = (stream_weight * stream_feh_pdf / stream_feh_pdf.max()) + (1 - stream_weight) * b_feh_pdf / b_feh_pdf.max()
+
+        axes[0, 1].plot(feh_range, stream_weight* stream_feh_pdf/stream_feh_pdf.max(), color=colors[0], ls='dashed', lw=2)
+        axes[0, 1].plot(feh_range, b_feh_pdf/b_feh_pdf.max(), color=colors[1], ls='dashed', lw=2)
+        a_right = b_feh_pdf[-1] / b_feh_pdf.max()
+        a_left = b_feh_pdf[0] / b_feh_pdf.max()
         y0, y1 = axes[0,1].get_ylim()
-        axes[0,1].axvline(feh_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        axes[0,1].axvline(feh_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a_right - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        axes[0,1].axvline(feh_range[0], ymin=(0 - y0)/(y1 - y0), ymax=(a_left - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        if show_total:
+            axes[0, 1].plot(feh_range, total_pdf_feh/total_pdf_feh.max(), color='k', ls='solid', lw=3, alpha=0.3)
+            a_total_right = total_pdf_feh[-1] / total_pdf_feh.max()
+            a_total_left = total_pdf_feh[0] / total_pdf_feh.max()
+            axes[0,1].axvline(feh_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a_total_right - y0)/(y1 - y0), color='k', ls='solid', lw=3, alpha=0.3)
+            axes[0,1].axvline(feh_range[0], ymin=(0 - y0)/(y1 - y0), ymax=(a_total_left - y0)/(y1 - y0), color='k', ls='solid', lw=3, alpha=0.3)
         axes[0, 1].set_xlabel('[Fe/H]')
+
+        total_pdf_pmra = (stream_weight * stream_pmra_pdf / stream_pmra_pdf.max()) + (1 - stream_weight) * b_pmra_pdf / b_pmra_pdf.max()
+
+        axes[1, 0].plot(pmra_range, stream_weight* stream_pmra_pdf/stream_pmra_pdf.max(), color=colors[0], ls='dashed', lw=2)
+        axes[1, 0].plot(pmra_range, b_pmra_pdf/b_pmra_pdf.max(), color=colors[1], ls='dashed', lw=2)
+        a_right = b_pmra_pdf[-1] / b_pmra_pdf.max()
+        a_left = b_pmra_pdf[0] / b_pmra_pdf.max()
+        y0, y1 = axes[1,0].get_ylim()
+        axes[1,0].axvline(pmra_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a_right - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        axes[1,0].axvline(pmra_range[0], ymin=(0 - y0)/(y1 - y0), ymax=(a_left - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        if show_total:
+            axes[1, 0].plot(pmra_range, total_pdf_pmra/total_pdf_pmra.max(), color='k', ls='solid', lw=3, alpha=0.3)
+            a_total_right = total_pdf_pmra[-1] / total_pdf_pmra.max()
+            a_total_left = total_pdf_pmra[0] / total_pdf_pmra.max()
+            axes[1,0].axvline(pmra_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a_total_right - y0)/(y1 - y0), color='k', ls='solid', lw=3, alpha=0.3)
+            axes[1,0].axvline(pmra_range[0], ymin=(0 - y0)/(y1 - y0), ymax=(a_total_left - y0)/(y1 - y0), color='k', ls='solid', lw=3, alpha=0.3)
+        axes[1, 0].set_xlabel(r'$\mu_{RA}$ (mas/yr)')
+
+        total_pdf_pmdec = (stream_weight * stream_pmdec_pdf / stream_pmdec_pdf.max()) + (1 - stream_weight) * b_pmdec_pdf / b_pmdec_pdf.max()
+
+        axes[1, 1].plot(pmdec_range, stream_weight* stream_pmdec_pdf/stream_pmdec_pdf.max(), color=colors[0], ls='dashed', lw=2)
+        axes[1, 1].plot(pmdec_range, b_pmdec_pdf/b_pmdec_pdf.max(), color=colors[1], ls='dashed', lw=2)
+        a_right = b_pmdec_pdf[-1] / b_pmdec_pdf.max()
+        a_left = b_pmdec_pdf[0] / b_pmdec_pdf.max()
+        y0, y1 = axes[1,1].get_ylim()
+        axes[1,1].axvline(pmdec_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a_right - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        axes[1,1].axvline(pmdec_range[0], ymin=(0 - y0)/(y1 - y0), ymax=(a_left - y0)/(y1 - y0), color=colors[1], ls='dashed', lw=2)
+        if show_total:
+            axes[1, 1].plot(pmdec_range, total_pdf_pmdec/total_pdf_pmdec.max(), color='k', ls='solid', lw=3, alpha=0.3)
+            a_total_right = total_pdf_pmdec[-1] / total_pdf_pmdec.max()
+            a_total_left = total_pdf_pmdec[0] / total_pdf_pmdec.max()
+            axes[1,1].axvline(pmdec_range[-1], ymin=(0 - y0)/(y1 - y0), ymax=(a_total_right - y0)/(y1 - y0), color='k', ls='solid', lw=3, alpha=0.3)
+            axes[1,1].axvline(pmdec_range[0], ymin=(0 - y0)/(y1 - y0), ymax=(a_total_left - y0)/(y1 - y0), color='k', ls='solid', lw=3, alpha=0.3)
+        axes[1, 1].set_xlabel(r'$\mu_{DEC}$ (mas/yr)')
+
 
         return fig, axes
     
