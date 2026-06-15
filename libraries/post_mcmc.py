@@ -26,6 +26,7 @@ import os
 import corner
 import polars as pl
 from streamTutorial import StreamPlotter
+from paths import PATHS
 
 SPLINE_ZORDER = -5
 ERROR_BAR_ZORDER = -2
@@ -248,19 +249,20 @@ def d2dm(d):
     '''d in kpc'''
     return 5*np.log10(d*1000)-5
 
-def load_stream_mems(mem_path = '/home/jupyter-nassermoha/raid_nassermoha/data/runs/C-19-I21_250529_final_const/C-19-I21_phi2_spline_0.5%_mem.fits'):
+def load_stream_mems(mem_path):
 
     stream_run_directory =  os.path.dirname(mem_path)
     stream_data = table.Table.read(mem_path)
     return stream_data, stream_run_directory
 
-def load_desi_data(desi_path= '/raid/DESI/catalogs/loa/rv_output/241119/rvpix-loa.fits',
-                  distance_path='/raid/DESI/catalogs/loa/rv_output/241119/rvsdistnn-loa-241126.fits',
-                  decals_path='/raid/DESI/catalogs/loa/rv_output/241119/legacyphot-loa-241126.fits',
+def load_desi_data(desi_path=None, distance_path=None, decals_path=None,
                   desired_columns=None, fr=None, local=False):
     """
     Joseph's code to load DESI data
     """
+    if desi_path is None:    desi_path    = str(PATHS.desi_path)
+    if distance_path is None: distance_path = str(PATHS.dist_path)
+    if decals_path is None:  decals_path  = str(PATHS.decals_path)
     if not local:
         desired_columns = [
         'VRAD', 'VRAD_ERR', 'RVS_WARN', 'PARALLAX', 'PARALLAX_ERROR', 
@@ -374,11 +376,10 @@ def load_desi_data(desi_path= '/raid/DESI/catalogs/loa/rv_output/241119/rvpix-lo
          return desi_data
 
 
-def get_sel_qual_mask(
-    desi_path='/raid/DESI/catalogs/loa/rv_output/241119/rvpix-loa.fits',
-    distance_path='/raid/DESI/catalogs/loa/rv_output/241119/rvsdistnn-loa-241126.fits',
-    decals_path='/raid/DESI/catalogs/loa/rv_output/241119/legacyphot-loa-241126.fits'
-):
+def get_sel_qual_mask(desi_path=None, distance_path=None, decals_path=None):
+    if desi_path is None:    desi_path    = str(PATHS.desi_path)
+    if distance_path is None: distance_path = str(PATHS.dist_path)
+    if decals_path is None:  decals_path  = str(PATHS.decals_path)
     desired_columns = [
         'VRAD', 'VRAD_ERR', 'RVS_WARN', 'PARALLAX', 'PARALLAX_ERROR', 
         'RR_SPECTYPE', 'PMRA', 'PMRA_ERROR', 'PMDEC', 'PMDEC_ERROR', 
@@ -420,8 +421,10 @@ def import_mcmc_results(stream_run_directory):
 def mag_select(data, mag_min, mag_max, mag_col='rmag0'):
     return (data[mag_col] < mag_min) & (data[mag_col] > mag_max)
 
-def isochrone_cut(color_indx_wiggle = 0.10, isochrone_path= '/Users/nasserm/Documents/vscode/research/streamTut/DESI-DR1_streamTutorial/data/dotter/iso_a13.5_z0.00010.dat', 
+def isochrone_cut(color_indx_wiggle = 0.10, isochrone_path=None,
                   desi_data=[], desi_distance=18e3, withAss=True):
+    if isochrone_path is None:
+        isochrone_path = str(PATHS.dotter_dir / 'iso_a13.5_z0.00010.dat')
     dotter_mp = np.loadtxt(isochrone_path)
     # Obtain the M_g and M_r color band data
     dotter_g_mp = dotter_mp[:,6]
@@ -983,8 +986,8 @@ class StreamMembers:
                 cands = sorted(glob.glob(pat))
                 if cands:
                     return cands[0]
-            # Fall back to legacy hardcoded location if it exists
-            legacy = '/Users/nasserm/Documents/vscode/research/streamTut/DESI-DR1_streamTutorial/data/dotter/iso_a13.5_z0.00010.dat'
+            # Fall back to repo-bundled dotter directory
+            legacy = str(PATHS.dotter_dir / 'iso_a13.5_z0.00010.dat')
             if os.path.exists(legacy):
                 return legacy
             return path_hint or legacy
@@ -1035,7 +1038,11 @@ class StreamMembers:
         else:
             print('getting BHB and RRL data...')
             if withBHB:
-                bhb_path = '/Users/nasserm/Documents/vscode/research/streamTut/DESI-DR1_streamTutorial/data/loa_bhb_250116.fits' #NOTE
+                bhb_path = str(PATHS.bhb_path) if PATHS.bhb_path else None
+                if bhb_path is None:
+                    print("BHB path not configured in config.yaml — skipping BHB data.")
+                    self.bhb_handler = None
+                    withBHB = False
                 bhb_data = table.Table.read(bhb_path)
                 bhb_data['phi1'], bhb_data['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame, np.array(bhb_data['TARGET_RA'])*u.deg, np.array(bhb_data['TARGET_DEC'])*u.deg)
                 bhb_desi = bhb_data.to_pandas().merge(self.ms_handler.data, how='left', on=['TARGETID'], suffixes=('', '_desi'))
@@ -1064,7 +1071,10 @@ class StreamMembers:
                 self.bhb_handler = None
             
             if withRRL:
-                rrl_path = '/Users/nasserm/Documents/vscode/research/streamTut/DESI-DR1_streamTutorial/data/DESI_loa_VAC_v0.2.csv' #NOTE
+                rrl_path = str(PATHS.rrl_path) if PATHS.rrl_path else None
+                if rrl_path is None:
+                    print("RRL path not configured in config.yaml — skipping RRL data.")
+                    withRRL = False
                 rrl_data = pd.read_csv(rrl_path)
                 rrl_data['phi1'], rrl_data['phi2'] = stream_funcs.ra_dec_to_phi1_phi2(self.frame, np.array(rrl_data['TARGET_RA'])*u.deg, np.array(rrl_data['TARGET_DEC'])*u.deg)
                 rrl_data['PMRA'], rrl_data['PMDEC'] = rrl_data['pmra'], rrl_data['pmdec']
@@ -2832,7 +2842,7 @@ class StreamMembers:
     def vis_isochrone(
         self,
         color_index_wiggle=0.18,
-        isochrone_path='/Users/nasserm/Documents/vscode/research/streamTut/DESI-DR1_streamTutorial/data/dotter/iso_a13.5_z0.00010.dat',
+        isochrone_path=None,
         return_axes=False,
         absolute=True,
         horizontal_branch=False,
@@ -2904,6 +2914,8 @@ class StreamMembers:
                 print(f"Warning: Could not interpolate track distances: {e}")
                 return None
 
+        if isochrone_path is None:
+            isochrone_path = str(PATHS.dotter_dir / 'iso_a13.5_z0.00010.dat')
         dotter_mp = np.loadtxt(isochrone_path)
         dotter_g_mp = dotter_mp[:, 6]
         dotter_r_mp = dotter_mp[:, 7]

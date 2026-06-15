@@ -37,6 +37,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 # Suppress specific Astropy deprecation warnings
 warnings.filterwarnings("ignore", category=AstropyDeprecationWarning, module='gala.dynamics.core')
 import polars as pl
+from paths import PATHS
 
 # -----------------------------
 # Presentation style utilities
@@ -447,7 +448,9 @@ def drag_spline(
     }
 
 class Data:
-    def __init__(self, desi_path, sf_path='/raid/catalogs/streamfinder_gaiadr3.fits', cleaned_data=False, dist_path='', **kwargs):
+    def __init__(self, desi_path, sf_path=None, cleaned_data=False, dist_path='', **kwargs):
+        if sf_path is None:
+            sf_path = str(PATHS.sf_path)
         self.desi_path = desi_path
         self.sf_path = sf_path
         self.cleaned_data = cleaned_data

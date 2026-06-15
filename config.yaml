@@ -1,0 +1,28 @@
+# DESI_streamTutorial — External Data Paths
+#
+# These are the default paths on the Eridanus server.
+# Repo-bundled data (streamfinder_gaiadr3.fits, sf3_only_table.csv, dotter/)
+# is resolved automatically and does not need to be set here.
+#
+# ── Running locally? ──────────────────────────────────────────────────────────
+# 1. Copy this file:  cp config.yaml config.local.yaml
+# 2. Edit the paths in config.local.yaml to point to your local copies.
+# config.local.yaml is gitignored and will never be committed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+external_data:
+  # DESI radial-velocity catalogue
+  desi_path:    /raid/DESI/catalogs/loa/rv_output/241119/rvpix-loa.fits
+
+  # StreamFinder Gaia DR3 catalogue
+  sf_path:      /home/jupyter-nasserm/raid/nasserm/data/streamfinder_gaiadr3.fits
+
+  # RVS photometric-distance catalogue
+  dist_path:    /raid/DESI/catalogs/loa/rv_output/distance/rvsdistnn-loa-250218.fits
+
+  # DECaLS photometry catalogue
+  decals_path:  /raid/DESI/catalogs/loa/rv_output/241119/legacyphot-loa-241126.fits
+
+  # LOA-specific supplementary catalogues (leave empty if not available)
+  bhb_path:     ""
+  rrl_path:     ""

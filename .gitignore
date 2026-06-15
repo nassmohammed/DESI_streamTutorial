@@ -1,0 +1,16 @@
+# Local path overrides — copy config.yaml here and edit for your machine
+config.local.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Generated outputs
+runs/
+*.pkl
+drag_spline_ctrls.npz
